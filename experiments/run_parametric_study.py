@@ -41,9 +41,11 @@ def availability_print_park(line: AgroDroneLine) -> float:
     return 1.0 - (down / total if total > 0 else 0.0)
 
 
-def run_one(seed: int, t_pm: float, lim_drones_made: int, max_ticks: int):
+def run_one(seed: int, t_pm: float, lim_drones_made: int, max_ticks: int,
+            n_filament_suppliers: int = 1):
     line = AgroDroneLine(seed=seed, lim_drones_made=lim_drones_made,
-                          T_pm_print_park=t_pm, verbose=False)
+                          T_pm_print_park=t_pm, verbose=False,
+                          n_filament_suppliers=n_filament_suppliers)
     elapsed = 0.0
     buf = io.StringIO()
     try:
@@ -73,6 +75,9 @@ def main():
     ap.add_argument("--max-ticks", type=int, default=50000,
                      help="запобіжний ліміт тіків на репліку (50000 тіків = 5*10^6 с модельного часу)")
     ap.add_argument("--seed-base", type=int, default=1000)
+    ap.add_argument("--n-filament-suppliers", type=int, default=1,
+                     help="кількість паралельних постачальників Type0 (D9/D10); "
+                          "1 = поведінка до D9 (структурна стеля вузла 1)")
     ap.add_argument("--out", type=str, default="experiments/raw/results.csv")
     args = ap.parse_args()
 
@@ -86,7 +91,8 @@ def main():
             seed = args.seed_base + rep
             run_idx += 1
             t_run0 = time.time()
-            row = run_one(seed, t_pm, args.lim_drones, args.max_ticks)
+            row = run_one(seed, t_pm, args.lim_drones, args.max_ticks, args.n_filament_suppliers)
+            row["n_filament_suppliers"] = args.n_filament_suppliers
             row["rep"] = rep
             dt_run = time.time() - t_run0
             rows.append(row)
@@ -98,7 +104,8 @@ def main():
     with open(args.out, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["T_pm", "rep", "seed", "status",
                                                 "makespan_s", "drones_made",
-                                                "availability_print_park"])
+                                                "availability_print_park",
+                                                "n_filament_suppliers"])
         writer.writeheader()
         writer.writerows(rows)
 
