@@ -94,6 +94,9 @@ class ProductionNodeV3(ProductionNode):
         self.waste = {}
         self.decisions = 0
         self.t_setup = 0.0           # час переналагодження (LETUP) — втрата доступності в OEE
+        self.awaiting_crew = False   # ремонт чекає вільного техніка (Р30)
+        self.t_crew_wait = 0.0       # час відмовленого вузла в очікуванні техніка
+        self.line = None             # посилання на лінію (бригада), задає AgroDroneLineV3
 
     # ---- деградація (Р3, Р14) ------------------------------------------------
     def wear_ratio(self) -> float:
@@ -113,7 +116,10 @@ class ProductionNodeV3(ProductionNode):
         return 1.0 + c["speed_kappa"] * min(self.wear_ratio(), c["v_cap"])
 
     def pm_allowed(self) -> bool:
-        """Маска: ТО заборонено одразу після ТО (усі зносові складові майже нові)."""
+        """Маска: ТО заборонено одразу після ТО (усі зносові складові майже нові)
+        і коли немає вільного техніка (Р30) — планове ТО не чекає в черзі."""
+        if self.line is not None and not self.line.crew_free():
+            return False
         return self.wear_ratio() >= 0.01
 
     # ---- відмови (замість update_status v0.2) --------------------------------
@@ -160,6 +166,12 @@ class ProductionNodeV3(ProductionNode):
             self.cur_dur = sample_repair_duration(self.cfg["cm_mean"], self.cfg["cm_cv"], self.rng_cm)
         else:
             self.cur_dur = sample_pm_duration(self.cfg["pm_mean"], self.cfg["pm_cv"], self.rng_pm)
+        # бригада (Р30): ТО стартує лише з вільним техніком (див. pm_allowed);
+        # ремонт без вільного техніка стає в чергу (FIFO), вузол стоїть у REPAIR
+        self.awaiting_crew = False
+        if self.line is not None and not self.line.crew_acquire():
+            self.awaiting_crew = True
+            self.line.crew_queue.append(self)
         self.wait_since = None
         self.next_wait_decision = None
 
@@ -201,14 +213,21 @@ class ProductionNodeV3(ProductionNode):
                 self.op_time_since_pm = 0.0
                 self.status = NodeState.IDLE
                 self.progress = 0.0
+                if self.line is not None:
+                    self.line.crew_release()
 
         elif st == NodeState.REPAIR:
+            if self.awaiting_crew:
+                self.t_crew_wait += delta
+                return
             self.progress += delta
             if self.progress >= self.cur_dur:
                 self.rel.corrective_repair(self.failed_mode)
                 self.failed_mode = None
                 self.status = NodeState.IDLE
                 self.progress = 0.0
+                if self.line is not None:
+                    self.line.crew_release()
 
         elif st == NodeState.WORKING:
             op = self.current_op
@@ -319,12 +338,17 @@ class ProductionNodeV3(ProductionNode):
 class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
                  buffer_drones: float = 2.0, type0_cap: float = 4000.0, classes: dict | None = None,
-                 node_overrides: dict | None = None):
+                 node_overrides: dict | None = None, crew: int | None = None):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
                              verbose=False, n_filament_suppliers=n_filament_suppliers)
         self.master_seed = master_seed
         self.drone_times: list[float] = []
+        # ремонтна бригада (Р30): crew=None — необмежена (поведінка до Р30)
+        self.crew = crew
+        self.crew_busy = 0
+        self.crew_queue: list = []
+        self.crew_busy_time = 0.0
         streams = make_streams(master_seed, len(self.units))
         # буферні ліміти (Р22): запас на buffer_drones дронів для дискретних деталей
         per_drone = self.getResourcesForOneDrone("Type22")
@@ -337,9 +361,27 @@ class AgroDroneLineV3(AgroDroneLine):
             node.__class__ = ProductionNodeV3
             node.planner = self.planner
             node.upgrade_to_v3(class_config(node.id, classes, node_overrides), streams, i, policy)
+            node.line = self if crew is not None else None
             node.made_dron = None
         self.units[25].made_dron = self._drone_done       # вузол 26 (індекс 25)
         assert int(self.units[25].id) == 26
+
+    # ---- бригада (Р30) ----
+    def crew_free(self) -> bool:
+        return self.crew is None or self.crew_busy < self.crew
+
+    def crew_acquire(self) -> bool:
+        if not self.crew_free():
+            return False
+        self.crew_busy += 1
+        return True
+
+    def crew_release(self):
+        self.crew_busy -= 1
+        if self.crew_queue:                      # вільний технік одразу береться за ремонт із черги
+            nxt = self.crew_queue.pop(0)
+            self.crew_busy += 1
+            nxt.awaiting_crew = False
 
     def _stock(self, name):
         pool = self.res_manager.resources.get(name)
@@ -357,6 +399,8 @@ class AgroDroneLineV3(AgroDroneLine):
 
     def tick(self, elapsed_time):
         self.current_time = elapsed_time
+        if self.crew is not None:
+            self.crew_busy_time += self.crew_busy * DT
         self.res_manager.tick()
         for item in self.units:
             item.tick(elapsed_time, 0)
@@ -406,14 +450,16 @@ def _snapshot(line):
         s[n.id] = {"dur": {k.name: v for k, v in n.state_durations.items()},
                    "n_pm": n.n_pm, "n_pm_w": n.n_pm_waiting, "n_fail": n.n_fail,
                    "n_comp": n.n_completed, "n_good": n.n_good, "ideal": n.ideal_done,
-                   "waste0": n.waste.get("Type0", 0.0), "setup": n.t_setup}
-    return {"t": line.current_time, "drones": line.number_drones_made, "nodes": s}
+                   "waste0": n.waste.get("Type0", 0.0), "setup": n.t_setup,
+                   "crew_wait": n.t_crew_wait}
+    return {"t": line.current_time, "drones": line.number_drones_made, "nodes": s,
+            "crew_busy_time": line.crew_busy_time, "crew": line.crew}
 
 def run_v3(master_seed: int, policy, horizon_h: float, warmup_h: float, logger_path=None,
-           classes=None, node_overrides=None, **line_kw) -> dict:
+           classes=None, node_overrides=None, crew=None, **line_kw) -> dict:
     """Один прогін v0.3: горизонт і розігрів — у годинах модельного часу (Р19).
     Метрики рахуються на вікні [warmup, horizon]."""
-    line = AgroDroneLineV3(master_seed, policy, classes=classes, node_overrides=node_overrides, **line_kw)
+    line = AgroDroneLineV3(master_seed, policy, classes=classes, node_overrides=node_overrides, crew=crew, **line_kw)
     log = None
     if logger_path:
         from EventLog import EventLogger
@@ -464,7 +510,10 @@ def line_metrics(s0, s1, line) -> dict:
            "A": A, "P": P, "Q": Q, "OEE": O,
            "MTBF_h": (tot["run"] / tot["fail"] / 3600) if tot["fail"] else float("inf"),
            "failures": tot["fail"], "pm": tot["n_pm"], "pm_waiting": tot["n_pm_w"],
-           "waste_Type0": tot["waste0"]}
+           "waste_Type0": tot["waste0"],
+           "crew": s1["crew"] if s1["crew"] is not None else "inf",
+           "crew_util": ((s1["crew_busy_time"] - s0["crew_busy_time"]) / (s1["crew"] * T)) if s1["crew"] else float("nan"),
+           "crew_wait_h": sum(a1["crew_wait"] - s0["nodes"][nid]["crew_wait"] for nid, a1 in s1["nodes"].items()) / 3600}
     for cls, x in sorted(per_cls.items()):
         a, p, q, o = oee(x)
         out[f"{cls}_A"], out[f"{cls}_OEE"] = a, o
