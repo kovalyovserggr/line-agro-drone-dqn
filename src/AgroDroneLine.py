@@ -26,7 +26,7 @@ class SimulationComplete(Exception):
 class AgroDroneLine:
     def __init__(self, seed: int | None = None, lim_drones_made: int = 3,
                  T_pm_print_park: float | None = None, verbose: bool = True,
-                 n_filament_suppliers: int = 1):
+                 n_filament_suppliers: int = 1, n_printers: int = 15):
         # 🎲 Сідування RNG для відтворюваності репліки: усі stats.*.rvs() у
         # Efficiency.py семплюють через глобальний numpy-стан (не отримують
         # явний random_state), тому np.random.seed() перед побудовою лінії
@@ -48,8 +48,13 @@ class AgroDroneLine:
         # паралельних екструдерів філаменту на реальній лінії. За замовчуванням
         # =1 — поведінка, ідентична до фіксу D9 (не ламає старі прогони).
         self.n_filament_suppliers = n_filament_suppliers
+        # Стаття 3, Р38: n_printers > 15 додає копії принтера (node_params2) з id 201+
+        # у КІНЕЦЬ списку вузлів (індекси вузлів 1–26 і 101+ не зсуваються);
+        # за замовчуванням 15 — поведінка без змін. Зменшення — у LineV3.
+        self.n_printers = n_printers
         self.initialize_units(self.res_manager, T_pm_print_park=self.T_pm_print_park,
-                               n_filament_suppliers=self.n_filament_suppliers)  # Ініціалізація вузлів при створенні лінії
+                               n_filament_suppliers=self.n_filament_suppliers,
+                               n_printers=self.n_printers)  # Ініціалізація вузлів при створенні лінії
         self.initialize_resources()    # Ініціалізація складських запасів
         self.number_drones_made = 0    # Лічильник виготовлених дронів
         self.lim_drones_made = lim_drones_made  # Ліміт на виготовлення дронів
@@ -188,7 +193,7 @@ class AgroDroneLine:
 
     # Первинна ініціалізація вузлів та операцій виробничої лінії
     def initialize_units(self, resource_manager, T_pm_print_park: float | None = None,
-                          n_filament_suppliers: int = 1):
+                          n_filament_suppliers: int = 1, n_printers: int = 15):
 
         
         # === Розподіли ефективності ===
@@ -402,6 +407,11 @@ class AgroDroneLine:
             node_12, node_13, node_14, node_15, node_16, node_17, node_18, node_19, node_20, node_21,
             node_22, node_23, node_24, node_25, node_26
         ] + extra_filament_suppliers  # D9/D10: додаткові постачальники філаменту (id 101+), якщо запитано
+        # Р38: додаткові принтери (id 201+), якщо n_printers > 15
+        for i in range(1, n_printers - 15 + 1):
+            extra_printer = make_node(node_params2, resource_manager, self.planner, T_pm=T_pm_print_park)
+            extra_printer.id = 200 + i
+            self.units.append(extra_printer)
         print(f"✅ додавання вузлів завершено.")
 
     # Первинна ініціалізація ресурсів на складі

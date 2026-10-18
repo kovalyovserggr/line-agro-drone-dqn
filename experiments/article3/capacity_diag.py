@@ -11,14 +11,15 @@
       Варіанти: правило диспетчеризації × buffer_drones × type0_cap (кеп філаменту).
       Кепи — структурні параметри; тут вони лише локалізують, де втрачається потік.
 
-Запуск (L): PYTHONPATH=src python experiments/article3/capacity_diag.py --dispatch D17 quota random --workers 5 --out experiments/article3/raw/capacity_diag_L.csv
+Запуск (L): PYTHONPATH=src python experiments/article3/capacity_diag.py --dispatch D17 quota random --type0-cap 4000 auto --workers 5 --out experiments/article3/raw/capacity_diag_L.csv  (a3-capacity-diag-L)
+            PYTHONPATH=src python experiments/article3/capacity_diag.py --dt 25 50 100 200 --n-printers 12 15 17 19 --workers 5 --out experiments/article3/raw/dt_printers_L.csv  (a3-dt-printers-L)
 """
 import argparse, contextlib, csv, io, itertools, os, sys, time
 from collections import Counter
 from multiprocessing import Pool
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 sys.path.insert(0, os.path.dirname(__file__))
-from LineV3 import AgroDroneLineV3, _snapshot, line_metrics, DT
+from LineV3 import AgroDroneLineV3, _snapshot, line_metrics
 from line_config_v3 import scenario_classes
 from analytic_v3 import class_T_star_seconds
 from baselines_tune import make_policy, WARMUP_H, WINDOW_H
@@ -45,18 +46,18 @@ def bom_need(line):
 
 
 def job(a):
-    disp, kind, param, seed, buf, cap0, scale = a
+    disp, kind, param, seed, buf, cap0, scale, n_pr, dt = a
     cl, ov = scenario_classes("moderate")
     pol = make_policy(kind, param, class_T_star_seconds(cl))
     t0 = time.time()
     line = AgroDroneLineV3(seed, pol, classes=cl, node_overrides=ov, crew=1, dispatch=disp,
-                           buffer_drones=buf, type0_cap=cap0)
-    n_ticks = int((WARMUP_H + WINDOW_H) * scale * 3600 / DT)
-    warm = int(WARMUP_H * scale * 3600 / DT)
+                           buffer_drones=buf, type0_cap=cap0, n_printers=n_pr)
+    n_ticks = int(round((WARMUP_H + WINDOW_H) * scale * 3600 / dt))
+    warm = int(round(WARMUP_H * scale * 3600 / dt))
     t, s0 = 0.0, None
     with contextlib.redirect_stdout(io.StringIO()):
         for k in range(1, n_ticks + 1):
-            t += DT
+            t += dt
             line.tick(t)
             if k == warm:
                 s0 = _snapshot(line)
@@ -64,7 +65,7 @@ def job(a):
     m = line_metrics(s0, s1, line)
     T = s1["t"] - s0["t"]
     row = {"dispatch": disp, "policy": kind, "param": param, "seed": seed, "buffer_drones": buf,
-           "type0_cap": cap0 if cap0 == "auto" else int(cap0), "throughput_per_week": m["throughput_per_week"], "profit": m["profit"],
+           "type0_cap": cap0 if cap0 == "auto" else int(cap0), "n_printers": n_pr, "dt": dt, "throughput_per_week": m["throughput_per_week"], "profit": m["profit"],
            "OEE": m["OEE"]}
     # розклад часу за класами (частки календарного часу вікна)
     by_cls = {}
@@ -132,19 +133,22 @@ def analytic_bound(rows):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dispatch", nargs="+", default=["D17", "quota"])
+    ap.add_argument("--dispatch", nargs="+", default=["D17"])
     ap.add_argument("--buffer", nargs="+", type=float, default=[2.0])
-    ap.add_argument("--type0-cap", nargs="+", default=["4000", "auto"], help="г або auto (Р38)")
+    ap.add_argument("--type0-cap", nargs="+", default=["auto"], help="г або auto (Р38)")
     ap.add_argument("--policies", nargs="+", default=["B0:0", "B3:0.2"], help="політика:параметр")
     ap.add_argument("--seeds", nargs="+", type=int, default=[1000, 1001, 1002])
+    ap.add_argument("--n-printers", nargs="+", type=int, default=[15])
+    ap.add_argument("--dt", nargs="+", type=float, default=[100.0], help="крок такту, с (перевірка чутливості, Р38)")
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--horizon-scale", type=float, default=1.0, help="лише для димового тесту (<1)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     caps = [c if c == "auto" else float(c) for c in a.type0_cap]
     pols = [(p.split(":")[0], float(p.split(":")[1])) for p in a.policies]
-    jobs = [(d, k, prm, s, b, c, a.horizon_scale)
-            for (k, prm), d, b, c, s in itertools.product(pols, a.dispatch, a.buffer, caps, a.seeds)]
+    jobs = [(d, k, prm, s, b, c, a.horizon_scale, npr, dt)
+            for (k, prm), npr, dt, d, b, c, s in itertools.product(pols, a.n_printers, a.dt, a.dispatch,
+                                                                    a.buffer, caps, a.seeds)]
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     rows, writer = [], None
     with open(a.out, "w", newline="") as f, Pool(a.workers) as pool:
@@ -152,22 +156,23 @@ def main():
             if writer is None:
                 writer = csv.DictWriter(f, fieldnames=list(r)); writer.writeheader()
             writer.writerow(r); f.flush(); rows.append(r)
-            print(f"[{i}/{len(jobs)}] {r['dispatch']} buf={r['buffer_drones']} cap0={r['type0_cap']} {r['policy']} "
+            print(f"[{i}/{len(jobs)}] n_pr={r['n_printers']} dt={r['dt']:.0f} {r['dispatch']} buf={r['buffer_drones']} cap0={r['type0_cap']} {r['policy']} "
                   f"seed={r['seed']}: {r['throughput_per_week']:.2f} дрон/тиж; принтери C2: робота "
                   f"{r['C2_work']:.3f}, голод {r['C2_starved']:.3f}, блок {r['C2_blocked']:.3f}; "
                   f"екструзія C1: робота {r['C1_work']:.3f}, блок {r['C1_blocked']:.3f} ({r['wall_s']} с)", flush=True)
     # підсумок за конфігураціями
     print("\nСередні за seed (дрон/тиж; частки часу принтерів C2 і екструдерів C1):")
-    keys = sorted({(r["policy"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"])) for r in rows})
+    keys = sorted({(r["policy"], r["n_printers"], r["dt"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"])) for r in rows})
     for k in keys:
-        g = [r for r in rows if (r["policy"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"])) == k]
+        g = [r for r in rows if (r["policy"], r["n_printers"], r["dt"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"])) == k]
         mean = lambda f: sum(r[f] for r in g) / len(g)
-        print(f"  {k[0]} {k[1]:5s} buf={k[2]:.0f} cap0={k[3]:>6s}: {mean('throughput_per_week'):6.2f} дрон/тиж, "
+        print(f"  {k[0]} n_pr={k[1]:2d} dt={k[2]:4.0f} {k[3]:5s} buf={k[4]:.0f} cap0={k[5]:>6s}: {mean('throughput_per_week'):6.2f} дрон/тиж, "
               f"прибуток {mean('profit')/1e3:7.1f} тис. | "
               f"C2 роб {mean('C2_work'):.3f} налаг {mean('C2_setup'):.3f} ТО {mean('C2_pm'):.3f} рем {mean('C2_cm'):.3f} "
               f"голод {mean('C2_starved'):.3f} блок {mean('C2_blocked'):.3f} | "
               f"C1 роб {mean('C1_work'):.3f} голод {mean('C1_starved'):.3f} блок {mean('C1_blocked'):.3f}")
-    base = [r for r in rows if r["policy"] == "B3" and r["buffer_drones"] == 2.0 and r["type0_cap"] == "auto"]
+    base = [r for r in rows if r["policy"] == "B3" and r["buffer_drones"] == 2.0 and r["type0_cap"] == "auto"
+            and r["n_printers"] == 15 and r["dt"] == 100.0]
     analytic_bound(base or rows)
 
 

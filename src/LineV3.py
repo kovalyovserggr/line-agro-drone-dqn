@@ -350,11 +350,13 @@ class ProductionNodeV3(ProductionNode):
 # =============================================================================
 class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
-                 buffer_drones: float = 2.0, type0_cap: float | str = 4000.0, classes: dict | None = None,
-                 node_overrides: dict | None = None, crew: int | None = None, dispatch: str = "D17"):
+                 buffer_drones: float = 2.0, type0_cap: float | str = "auto", classes: dict | None = None,
+                 node_overrides: dict | None = None, crew: int | None = None, dispatch: str = "D17",
+                 n_printers: int = 15):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
-                             verbose=False, n_filament_suppliers=n_filament_suppliers)
+                             verbose=False, n_filament_suppliers=n_filament_suppliers,
+                             n_printers=max(15, n_printers))
         self.master_seed = master_seed
         self.drone_times: list[float] = []
         # правило диспетчеризації (тест резерву, Р36); окремий RNG — не зсуває інші потоки
@@ -365,25 +367,32 @@ class AgroDroneLineV3(AgroDroneLine):
         self.crew_busy = 0
         self.crew_queue: list = []
         self.crew_busy_time = 0.0
+        # потоки RNG — за індексом вузла в ПОВНОМУ списку (до вилучення принтерів),
+        # щоб у вузлів, що лишаються, потоки не залежали від n_printers (CRN, Р6)
         streams = make_streams(master_seed, len(self.units))
+        orig_idx = {id(n): i for i, n in enumerate(self.units)}
+        self.n_printers = n_printers
+        if n_printers < 15:                       # Р38: вилучаємо принтери з найбільшими id
+            drop = {int(i) for i in range(2 + n_printers, 17)}
+            self.units = [n for n in self.units if int(n.id) not in drop]
         # буферні ліміти (Р22): запас на buffer_drones дронів для дискретних деталей
         per_drone = self.getResourcesForOneDrone("Type22")
         caps = {k: max(1, math.ceil(buffer_drones * v)) for k, v in per_drone.items()
                 if k not in BULK and k != "Type22"}
-        # Type0: число — кеп у грамах (4000 — Р22, до Р38); "auto" — на buffer_drones дронів
-        # за BOM, як і для дискретних деталей (Р38)
+        # Type0: "auto" (за замовчуванням з Р38) — на buffer_drones дронів за BOM, як і для
+        # дискретних деталей; число — кеп у грамах (4000 — Р22, серії до a3-v0.10)
         caps["Type0"] = buffer_drones * per_drone["Type0"] if type0_cap == "auto" else float(type0_cap)
         self.planner = ProductionPlannerV3(self.planner, caps, self._stock, self._in_progress)
         self.planner.get_bom_footprint = self.get_bom_footprint
-        for i, node in enumerate(self.units):
+        for node in self.units:
             node.__class__ = ProductionNodeV3
             node.planner = self.planner
-            node.upgrade_to_v3(class_config(node.id, classes, node_overrides), streams, i, policy)
+            node.upgrade_to_v3(class_config(node.id, classes, node_overrides), streams, orig_idx[id(node)], policy)
             node.line = self if crew is not None else None
             node.line_ref = self
             node.made_dron = None
-        self.units[25].made_dron = self._drone_done       # вузол 26 (індекс 25)
-        assert int(self.units[25].id) == 26
+        last = next(n for n in self.units if int(n.id) == 26)   # вузол 26 — випуск дрона
+        last.made_dron = self._drone_done
 
     # ---- бригада (Р30) ----
     def crew_free(self) -> bool:
@@ -417,9 +426,10 @@ class AgroDroneLineV3(AgroDroneLine):
         self.drone_times.append(self.current_time)
 
     def tick(self, elapsed_time):
+        step = elapsed_time - self.current_time      # крок такту (не залежить від константи DT)
         self.current_time = elapsed_time
         if self.crew is not None:
-            self.crew_busy_time += self.crew_busy * DT
+            self.crew_busy_time += self.crew_busy * step
         self.res_manager.tick()
         for item in self.units:
             item.tick(elapsed_time, 0)
@@ -475,7 +485,7 @@ def _snapshot(line):
             "crew_busy_time": line.crew_busy_time, "crew": line.crew}
 
 def run_v3(master_seed: int, policy, horizon_h: float, warmup_h: float, logger_path=None,
-           classes=None, node_overrides=None, crew=None, **line_kw) -> dict:
+           classes=None, node_overrides=None, crew=None, dt: float = DT, **line_kw) -> dict:
     """Один прогін v0.3: горизонт і розігрів — у годинах модельного часу (Р19).
     Метрики рахуються на вікні [warmup, horizon]."""
     line = AgroDroneLineV3(master_seed, policy, classes=classes, node_overrides=node_overrides, crew=crew, **line_kw)
@@ -484,12 +494,12 @@ def run_v3(master_seed: int, policy, horizon_h: float, warmup_h: float, logger_p
         from EventLog import EventLogger
         log = EventLogger(logger_path, line, meta={"model": "v0.3", "seed": master_seed,
                                                     "policy": getattr(policy, "name", "?")})
-    n_ticks = int(horizon_h * 3600 / DT)
-    warm_tick = int(warmup_h * 3600 / DT)
+    n_ticks = int(round(horizon_h * 3600 / dt))
+    warm_tick = int(round(warmup_h * 3600 / dt))
     t, s0 = 0.0, None
     with contextlib.redirect_stdout(io.StringIO()):
         for k in range(1, n_ticks + 1):
-            t += DT
+            t += dt
             line.tick(t)
             if k == warm_tick:
                 s0 = _snapshot(line)

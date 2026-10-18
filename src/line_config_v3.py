@@ -61,9 +61,9 @@ NODE_OVERRIDES = {
 
 def node_class(node_id: float) -> str:
     i = int(node_id)
-    if i == 1 or i >= 100:
+    if i == 1 or 100 <= i < 200:      # екструзія: вузол 1 і постачальники 101+
         return "C1"
-    if 2 <= i <= 16:
+    if 2 <= i <= 16 or 200 <= i < 300:  # принтери: 2–16 і додаткові 201+ (Р38)
         return "C2"
     if 17 <= i <= 21:
         return "C3"
@@ -133,4 +133,10 @@ ECONOMICS = {
 
 def maint_cost(node_id: float) -> float:
     i = int(node_id)
-    return MAINT_COST_BY_NODE.get(i, MAINT_COST_BY_NODE[1] if i >= 100 else 500.0)
+    if i in MAINT_COST_BY_NODE:
+        return MAINT_COST_BY_NODE[i]
+    if 100 <= i < 200:
+        return MAINT_COST_BY_NODE[1]        # додаткові екструдери
+    if 200 <= i < 300:
+        return MAINT_COST_BY_NODE[2]        # додаткові принтери (Р38)
+    return 500.0
