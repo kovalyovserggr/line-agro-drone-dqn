@@ -116,3 +116,21 @@ def scenario_classes(name: str = "moderate", classes: dict | None = None,
             q = v["quality"]
             v["quality"] = {"p0": q["p0"], "pmax": min(0.5, q["p0"] + s * (q["pmax"] - q["p0"]))}
     return cl, ov
+
+
+# --- Економічні параметри (Р32) ----------------------------------------------------
+# Вартість одного ТО вузла — поле maintenance_cost з параметрів ефективності моделі
+# v0.2 (AgroDroneLine.py, efficiency_paramsN), умовні одиниці = USD (автор, 2026-10-18).
+MAINT_COST_BY_NODE = {1: 700.0, **{i: 500.0 for i in range(2, 17)}, 17: 600.0, 18: 600.0,
+                      19: 550.0, 20: 550.0, 21: 600.0, 22: 400.0, 23: 450.0, 24: 500.0,
+                      25: 450.0, 26: 700.0}
+ECONOMICS = {
+    "drone_value": 4000.0,          # USD за придатний дрон (автор: 3000–5000, база 4000)
+    "repair_cost_factor": 5.0,      # ремонт = k × вартість ТО того ж вузла (ПРИПУЩЕННЯ, сценарна вісь)
+    "filament_cost_per_g": 0.02,    # USD/г (≈20 USD/кг; ПРИПУЩЕННЯ, звірити з цінами)
+}
+
+
+def maint_cost(node_id: float) -> float:
+    i = int(node_id)
+    return MAINT_COST_BY_NODE.get(i, MAINT_COST_BY_NODE[1] if i >= 100 else 500.0)

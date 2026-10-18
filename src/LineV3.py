@@ -27,7 +27,7 @@ from ProductionPlanner import ProductionPlanner
 from Resource import RequestRes
 from ReliabilityV3 import (FailureMode, NodeReliability, make_streams,
                            sample_pm_duration, sample_repair_duration)
-from line_config_v3 import class_config
+from line_config_v3 import class_config, maint_cost, ECONOMICS
 
 CONTINUE, PM = 0, 1
 E1, E2, E3 = "E1", "E2", "E3"
@@ -483,7 +483,7 @@ def line_metrics(s0, s1, line) -> dict:
     T = s1["t"] - s0["t"]
     drones = s1["drones"] - s0["drones"]
     tot = {"run": 0.0, "setup": 0.0, "pm": 0.0, "cm": 0.0, "ideal": 0.0, "comp": 0, "good": 0,
-           "fail": 0, "n_pm": 0, "n_pm_w": 0, "waste0": 0.0}
+           "fail": 0, "n_pm": 0, "n_pm_w": 0, "waste0": 0.0, "pm_cost": 0.0, "cm_cost": 0.0}
     per_cls = {}
     for nid, a1 in s1["nodes"].items():
         a0 = s0["nodes"][nid]
@@ -494,6 +494,8 @@ def line_metrics(s0, s1, line) -> dict:
              "good": a1["n_good"] - a0["n_good"], "fail": a1["n_fail"] - a0["n_fail"],
              "n_pm": a1["n_pm"] - a0["n_pm"], "n_pm_w": a1["n_pm_w"] - a0["n_pm_w"],
              "waste0": a1["waste0"] - a0["waste0"]}
+        x["pm_cost"] = x["n_pm"] * maint_cost(nid)
+        x["cm_cost"] = x["fail"] * maint_cost(nid) * ECONOMICS["repair_cost_factor"]
         for k in tot: tot[k] += x[k]
         c = per_cls.setdefault(next(n.cls for n in line.units if n.id == nid), {k: 0.0 for k in tot})
         for k in tot: c[k] += x[k]
@@ -511,6 +513,12 @@ def line_metrics(s0, s1, line) -> dict:
            "MTBF_h": (tot["run"] / tot["fail"] / 3600) if tot["fail"] else float("inf"),
            "failures": tot["fail"], "pm": tot["n_pm"], "pm_waiting": tot["n_pm_w"],
            "waste_Type0": tot["waste0"],
+           # економіка (Р32), за рік вікна; базові ставки — line_config_v3.ECONOMICS
+           "pm_cost": tot["pm_cost"], "cm_cost": tot["cm_cost"],
+           "material_cost": tot["waste0"] * ECONOMICS["filament_cost_per_g"],
+           "revenue": drones * ECONOMICS["drone_value"],
+           "profit": drones * ECONOMICS["drone_value"] - tot["pm_cost"] - tot["cm_cost"]
+                     - tot["waste0"] * ECONOMICS["filament_cost_per_g"],
            "crew": s1["crew"] if s1["crew"] is not None else "inf",
            "crew_util": ((s1["crew_busy_time"] - s0["crew_busy_time"]) / (s1["crew"] * T)) if s1["crew"] else float("nan"),
            "crew_wait_h": sum(a1["crew_wait"] - s0["nodes"][nid]["crew_wait"] for nid, a1 in s1["nodes"].items()) / 3600}
