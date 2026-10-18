@@ -271,7 +271,7 @@ class ProductionNodeV3(ProductionNode):
                 return
             self.wait_since = None
             self.next_wait_decision = None
-            candidates.sort(key=lambda op: (-self._pending_demand(op), self._quota_ratio(op)))
+            self._sort_candidates(candidates)
             # E1: рішення до подачі запиту; d_next — тривалість першого кандидата (D17)
             if self._ask(E1, candidates[0].duration) == PM:
                 self._do_pm(waiting=False)
@@ -295,6 +295,19 @@ class ProductionNodeV3(ProductionNode):
             self.next_wait_decision = now + DELTA_W
             return self._ask(E3, d_next) == PM
         return False
+
+    def _sort_candidates(self, candidates):
+        """Правило диспетчеризації (який тип операції запускати), задається лінією:
+        D17 — за реальним попитом (за замовчуванням); list — порядок списку операцій;
+        quota — найменша заповненість буфера; random — випадково (окремий RNG лінії)."""
+        mode = getattr(self.line_ref, "dispatch", "D17") if getattr(self, "line_ref", None) else "D17"
+        if mode == "D17":
+            candidates.sort(key=lambda op: (-self._pending_demand(op), self._quota_ratio(op)))
+        elif mode == "quota":
+            candidates.sort(key=lambda op: self._quota_ratio(op))
+        elif mode == "random":
+            self.line_ref.dispatch_rng.shuffle(candidates)
+        # "list" — без сортування (порядок self.operations)
 
     # ---- D17: вибір операції за реальним попитом (без змін логіки) ------------
     def _pending_demand(self, op):
@@ -338,12 +351,15 @@ class ProductionNodeV3(ProductionNode):
 class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
                  buffer_drones: float = 2.0, type0_cap: float = 4000.0, classes: dict | None = None,
-                 node_overrides: dict | None = None, crew: int | None = None):
+                 node_overrides: dict | None = None, crew: int | None = None, dispatch: str = "D17"):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
                              verbose=False, n_filament_suppliers=n_filament_suppliers)
         self.master_seed = master_seed
         self.drone_times: list[float] = []
+        # правило диспетчеризації (тест резерву, Р36); окремий RNG — не зсуває інші потоки
+        self.dispatch = dispatch
+        self.dispatch_rng = np.random.default_rng([master_seed, 777])
         # ремонтна бригада (Р30): crew=None — необмежена (поведінка до Р30)
         self.crew = crew
         self.crew_busy = 0
@@ -362,6 +378,7 @@ class AgroDroneLineV3(AgroDroneLine):
             node.planner = self.planner
             node.upgrade_to_v3(class_config(node.id, classes, node_overrides), streams, i, policy)
             node.line = self if crew is not None else None
+            node.line_ref = self
             node.made_dron = None
         self.units[25].made_dron = self._drone_done       # вузол 26 (індекс 25)
         assert int(self.units[25].id) == 26
