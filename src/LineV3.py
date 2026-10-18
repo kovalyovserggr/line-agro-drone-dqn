@@ -350,7 +350,7 @@ class ProductionNodeV3(ProductionNode):
 # =============================================================================
 class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
-                 buffer_drones: float = 2.0, type0_cap: float = 4000.0, classes: dict | None = None,
+                 buffer_drones: float = 2.0, type0_cap: float | str = 4000.0, classes: dict | None = None,
                  node_overrides: dict | None = None, crew: int | None = None, dispatch: str = "D17"):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
@@ -370,7 +370,9 @@ class AgroDroneLineV3(AgroDroneLine):
         per_drone = self.getResourcesForOneDrone("Type22")
         caps = {k: max(1, math.ceil(buffer_drones * v)) for k, v in per_drone.items()
                 if k not in BULK and k != "Type22"}
-        caps["Type0"] = type0_cap
+        # Type0: число — кеп у грамах (4000 — Р22, до Р38); "auto" — на buffer_drones дронів
+        # за BOM, як і для дискретних деталей (Р38)
+        caps["Type0"] = buffer_drones * per_drone["Type0"] if type0_cap == "auto" else float(type0_cap)
         self.planner = ProductionPlannerV3(self.planner, caps, self._stock, self._in_progress)
         self.planner.get_bom_footprint = self.get_bom_footprint
         for i, node in enumerate(self.units):
