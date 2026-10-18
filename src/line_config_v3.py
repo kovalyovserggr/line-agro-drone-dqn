@@ -76,11 +76,12 @@ def node_class(node_id: float) -> str:
     raise ValueError(f"невідомий вузол {node_id}")
 
 
-def class_config(node_id: float, classes: dict | None = None) -> dict:
+def class_config(node_id: float, classes: dict | None = None, overrides: dict | None = None) -> dict:
     """Конфіг вузла в секундах: класовий + перевизначення для окремих вузлів."""
     classes = classes or CLASSES
+    overrides = NODE_OVERRIDES if overrides is None else overrides
     c = dict(classes[node_class(node_id)])
-    c.update(NODE_OVERRIDES.get(int(node_id), {}))
+    c.update(overrides.get(int(node_id), {}))
     return {
         "cls": node_class(node_id),
         "modes": [(n, b, eta * H, qp, qc) for (n, b, eta, qp, qc) in c["modes"]],
@@ -90,3 +91,28 @@ def class_config(node_id: float, classes: dict | None = None) -> dict:
         "speed_kappa": c["speed_kappa"],
         "v_cap": 1.0,   # деградація швидкості насичується на v/η = 1
     }
+
+
+# --- Сценарії деградації якості та швидкості (Р28) ------------------------------
+# Множник s застосовується до приросту браку (p_max − p0) і до κ; p_max не вище 0.5.
+# «Помірний» = базові значення вище. «Сильний» для C2: p_max = 0.01 + 2·0.09 = 0.19 —
+# верхня межа частки невдалих друків (Song & Telenko 2016, 19% маси матеріалу).
+DEGRADATION_SCENARIOS = {"weak": 0.5, "moderate": 1.0, "strong": 2.0}
+
+
+def scenario_classes(name: str = "moderate", classes: dict | None = None,
+                     overrides: dict | None = None):
+    """Повертає (classes, node_overrides) для сценарію деградації."""
+    import copy
+    s = DEGRADATION_SCENARIOS[name]
+    cl = copy.deepcopy(classes or CLASSES)
+    for c in cl.values():
+        q = c["quality"]
+        c["quality"] = {"p0": q["p0"], "pmax": min(0.5, q["p0"] + s * (q["pmax"] - q["p0"]))}
+        c["speed_kappa"] = s * c["speed_kappa"]
+    ov = copy.deepcopy(overrides if overrides is not None else NODE_OVERRIDES)
+    for v in ov.values():
+        if "quality" in v:
+            q = v["quality"]
+            v["quality"] = {"p0": q["p0"], "pmax": min(0.5, q["p0"] + s * (q["pmax"] - q["p0"]))}
+    return cl, ov

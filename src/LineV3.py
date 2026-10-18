@@ -318,7 +318,8 @@ class ProductionNodeV3(ProductionNode):
 # =============================================================================
 class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
-                 buffer_drones: float = 2.0, type0_cap: float = 4000.0, classes: dict | None = None):
+                 buffer_drones: float = 2.0, type0_cap: float = 4000.0, classes: dict | None = None,
+                 node_overrides: dict | None = None):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
                              verbose=False, n_filament_suppliers=n_filament_suppliers)
@@ -335,7 +336,7 @@ class AgroDroneLineV3(AgroDroneLine):
         for i, node in enumerate(self.units):
             node.__class__ = ProductionNodeV3
             node.planner = self.planner
-            node.upgrade_to_v3(class_config(node.id, classes), streams, i, policy)
+            node.upgrade_to_v3(class_config(node.id, classes, node_overrides), streams, i, policy)
             node.made_dron = None
         self.units[25].made_dron = self._drone_done       # вузол 26 (індекс 25)
         assert int(self.units[25].id) == 26
@@ -409,10 +410,10 @@ def _snapshot(line):
     return {"t": line.current_time, "drones": line.number_drones_made, "nodes": s}
 
 def run_v3(master_seed: int, policy, horizon_h: float, warmup_h: float, logger_path=None,
-           classes=None, **line_kw) -> dict:
+           classes=None, node_overrides=None, **line_kw) -> dict:
     """Один прогін v0.3: горизонт і розігрів — у годинах модельного часу (Р19).
     Метрики рахуються на вікні [warmup, horizon]."""
-    line = AgroDroneLineV3(master_seed, policy, classes=classes, **line_kw)
+    line = AgroDroneLineV3(master_seed, policy, classes=classes, node_overrides=node_overrides, **line_kw)
     log = None
     if logger_path:
         from EventLog import EventLogger

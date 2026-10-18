@@ -142,6 +142,7 @@ def learned_threshold(ag, beta):
         acts.append(ag.act(np.array([v, pf], np.float32), greedy=True))
     k = next((j for j in range(1, J_MAX + 1) if acts[j] == 1), None)
     monotone = k is None or all(acts[j] == 1 for j in range(k, min(k + 40, J_MAX + 1)))
+    learned_threshold.last_acts = "".join(map(str, acts))   # повний вектор дій для діагностики
     return k, monotone
 
 # -----------------------------------------------------------------------------
@@ -179,7 +180,8 @@ def main():
                   f"[{'OK' if ok else 'FAIL'}] ({time.time()-t0:.0f} с)", flush=True)
             rows.append({"beta": beta, "agent_seed": sd, "steps": args.steps, "lr_end": args.lr_end, "batch": args.batch, "k_dp": k_dp, "k_avg_opt": k_avg,
                          "T_continuous": T_c, "k_dqn": k_q, "monotone": mono, "rate_dqn": rate_q,
-                         "rate_opt": rate_opt, "rel": rel, "ok": ok})
+                         "rate_opt": rate_opt, "rel": rel, "ok": ok,
+                         "acts": learned_threshold.last_acts})
     if args.out:
         os.makedirs(os.path.dirname(args.out), exist_ok=True)
         with open(args.out, "w", newline="") as f:
