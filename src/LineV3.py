@@ -97,6 +97,7 @@ class ProductionNodeV3(ProductionNode):
         self.awaiting_crew = False   # ремонт чекає вільного техніка (Р30)
         self.t_crew_wait = 0.0       # час відмовленого вузла в очікуванні техніка
         self.line = None             # посилання на лінію (бригада), задає AgroDroneLineV3
+        self.r_acc = 0.0             # локальна економічна винагорода вузла, USD (Р41, варіант A)
 
     # ---- деградація (Р3, Р14) ------------------------------------------------
     def wear_ratio(self) -> float:
@@ -132,6 +133,7 @@ class ProductionNodeV3(ProductionNode):
         if failed is not None:
             self.failed_mode = failed
             self.n_fail += 1
+            self.r_acc -= maint_cost(self.id) * ECONOMICS["repair_cost_factor"]   # Р41
             self._interrupt_v3(NodeState.REPAIR)
 
     def _interrupt_v3(self, new_status: NodeState):
@@ -141,6 +143,12 @@ class ProductionNodeV3(ProductionNode):
         op = self.current_op
         if op is not None and op.state == OperationState.EXECUTING:
             f = min(1.0, op.progress / op.duration) if op.duration > 0 else 1.0
+            val = self.line_ref.value_usd
+            for res, qty in op.input_resources.items():        # Р41: втрачена цінність входів
+                lost_q = f * qty if res in BULK else qty
+                self.r_acc -= lost_q * val.get(res, 0.0)
+                if res == "Type0":
+                    self.r_acc -= lost_q * ECONOMICS["filament_cost_per_g"]
             for res, qty in op.input_resources.items():
                 if res in BULK:
                     lost = f * qty
@@ -185,6 +193,7 @@ class ProductionNodeV3(ProductionNode):
 
     def _do_pm(self, waiting: bool):
         self.n_pm += 1
+        self.r_acc -= maint_cost(self.id)                       # Р41
         if waiting:
             self.n_pm_waiting += 1
             self._withdraw_request()
@@ -241,6 +250,7 @@ class ProductionNodeV3(ProductionNode):
                             self.rel.n_failures[failed] += 1
                         self.failed_mode = failed
                         self.n_fail += 1
+                        self.r_acc -= maint_cost(self.id) * ECONOMICS["repair_cost_factor"]   # Р41
                         self._interrupt_v3(NodeState.REPAIR)
                         continue
                     self.rel.advance(use)
@@ -499,16 +509,22 @@ class ProductionNodeV3(ProductionNode):
         self.n_completed += 1
         self.ideal_done += op.duration
         defective = self.rng_q.random() < self.p_def()
+        val = self.line_ref.value_usd
         if defective:
+            # брак: втрачено втілену цінність входів і матеріал (Р41)
+            self.r_acc -= sum(qty * val.get(res, 0.0) for res, qty in op.input_resources.items())
             for res, qty in op.input_resources.items():
                 if res in BULK:
                     self.waste[res] = self.waste.get(res, 0.0) + qty
+                    if res == "Type0":
+                        self.r_acc -= qty * ECONOMICS["filament_cost_per_g"]
             for res, qty in self.planner.get_bom_footprint(op.name).items():
                 if res not in BULK:
                     self.defects[res] = self.defects.get(res, 0) + qty
             op.resourses = []
         else:
             self.n_good += 1
+            self.r_acc += self.line_ref.value_added_usd[op.name]     # додана цінність операції (Р41)
             op.create_resource(self.id)
             self.produced[op.name] = self.produced.get(op.name, 0) + (1000 if op.name == "Type0" else 1)
             if self.made_dron:
@@ -558,6 +574,7 @@ class AgroDroneLineV3(AgroDroneLine):
         caps["Type0"] = buffer_drones * per_drone["Type0"] if type0_cap == "auto" else float(type0_cap)
         self.planner = ProductionPlannerV3(self.planner, caps, self._stock, self._in_progress)
         self.planner.get_bom_footprint = self.get_bom_footprint
+        self._build_value_tables()
         for node in self.units:
             node.__class__ = ProductionNodeV3
             node.planner = self.planner
@@ -584,6 +601,49 @@ class AgroDroneLineV3(AgroDroneLine):
             nxt = self.crew_queue.pop(0)
             self.crew_busy += 1
             nxt.awaiting_crew = False
+
+    def _build_value_tables(self):
+        """Р41: втілена цінність ресурсів (ідеальний час обробки за BOM) у USD:
+        V(Type22) = drone_value. value_added_usd[op] — внесок однієї придатної
+        операції; сума внесків за BOM одного дрона = drone_value."""
+        ops = {}
+        for n in self.units:
+            for op in n.operations:
+                ops.setdefault(op.name, op)
+        out_q = lambda name: 1000.0 if name == "Type0" else 1.0
+        memo = {}
+        def V(name):                                   # секунди втіленої обробки на одиницю
+            if name not in ops:
+                return 0.0                             # сировина (TypePL)
+            if name not in memo:
+                op = ops[name]
+                memo[name] = (op.duration + sum(q * V(r) for r, q in op.input_resources.items())) / out_q(name)
+            return memo[name]
+        total = V("Type22")
+        k = ECONOMICS["drone_value"] / total
+        self.value_usd = {name: V(name) * k for name in ops}
+        self.value_added_usd = {name: ops[name].duration * k for name in ops}
+        self.value_total_s = total
+
+    def _status_counts(self) -> dict:
+        """Р41: глобальні ознаки для агента (кеш на такт): частка вузлів у ТО/ремонті
+        (усього і за класами), частка принтерів і екструдерів без роботи."""
+        c = getattr(self, "_sc_cache", None)
+        if c is not None and c[0] == self.current_time:
+            return c[1]
+        tot, down = {}, {}
+        idle = {"C1": 0, "C2": 0}
+        for n in self.units:
+            tot[n.cls] = tot.get(n.cls, 0) + 1
+            if n.status in (NodeState.MAINTENANCE, NodeState.REPAIR):
+                down[n.cls] = down.get(n.cls, 0) + 1
+            elif n.cls in idle and n.status in (NodeState.IDLE, NodeState.WAITING_FOR_RESOURCE):
+                idle[n.cls] += 1
+        out = {"down": sum(down.values()) / len(self.units),
+               "down_cls": {k: down.get(k, 0) / v for k, v in tot.items()},
+               "C2_idle": idle["C2"] / tot.get("C2", 1), "C1_idle": idle["C1"] / tot.get("C1", 1)}
+        self._sc_cache = (self.current_time, out)
+        return out
 
     def allocate_pass(self):
         """Р39: прохід розподілу ресурсів посеред такту — та сама логіка і той самий
@@ -670,7 +730,7 @@ def _snapshot(line):
                    "n_pm": n.n_pm, "n_pm_w": n.n_pm_waiting, "n_fail": n.n_fail,
                    "n_comp": n.n_completed, "n_good": n.n_good, "ideal": n.ideal_done,
                    "waste0": n.waste.get("Type0", 0.0), "setup": n.t_setup,
-                   "crew_wait": n.t_crew_wait}
+                   "crew_wait": n.t_crew_wait, "r_acc": n.r_acc}
     return {"t": line.current_time, "drones": line.number_drones_made, "nodes": s,
             "crew_busy_time": line.crew_busy_time, "crew": line.crew}
 
@@ -738,6 +798,8 @@ def line_metrics(s0, s1, line) -> dict:
            "revenue": drones * ECONOMICS["drone_value"],
            "profit": drones * ECONOMICS["drone_value"] - tot["pm_cost"] - tot["cm_cost"]
                      - tot["waste0"] * ECONOMICS["filament_cost_per_g"],
+           # Р41: сума локальних винагород вузлів за вікно (≈ прибуток з точністю до зміни НЗВ)
+           "reward_sum": sum(a1["r_acc"] - s0["nodes"][nid]["r_acc"] for nid, a1 in s1["nodes"].items()),
            "crew": s1["crew"] if s1["crew"] is not None else "inf",
            "crew_util": ((s1["crew_busy_time"] - s0["crew_busy_time"]) / (s1["crew"] * T)) if s1["crew"] else float("nan"),
            "crew_wait_h": sum(a1["crew_wait"] - s0["nodes"][nid]["crew_wait"] for nid, a1 in s1["nodes"].items()) / 3600}

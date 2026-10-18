@@ -117,6 +117,8 @@ class DoubleDQNAgentV3:
 
     @property
     def eps(self):
+        if getattr(self, "eps_fixed", None) is not None:      # графік ε задає зовнішній цикл (за епізодами)
+            return self.eps_fixed
         f = min(1.0, self.steps / self.eps_steps)
         return self.eps_start + f * (self.eps_end - self.eps_start)
 
