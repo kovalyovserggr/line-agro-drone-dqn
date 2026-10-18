@@ -524,7 +524,7 @@ class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
                  buffer_drones: float = 2.0, type0_cap: float | str = "auto", classes: dict | None = None,
                  node_overrides: dict | None = None, crew: int | None = None, dispatch: str = "D17",
-                 n_printers: int = 15, time_carry: bool = False):
+                 n_printers: int = 15, time_carry: bool = True):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
                              verbose=False, n_filament_suppliers=n_filament_suppliers,
@@ -533,7 +533,7 @@ class AgroDroneLineV3(AgroDroneLine):
         self.drone_times: list[float] = []
         # правило диспетчеризації (тест резерву, Р36); окремий RNG — не зсуває інші потоки
         self.dispatch = dispatch
-        # Р39: такт без втрати часу на переходах (False — поведінка до Р39)
+        # Р39: такт без втрати часу на переходах (за замовчуванням з a3-v0.13; False — поведінка до Р39)
         self.time_carry = time_carry
         self.dispatch_rng = np.random.default_rng([master_seed, 777])
         # ремонтна бригада (Р30): crew=None — необмежена (поведінка до Р30)
