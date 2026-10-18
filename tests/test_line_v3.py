@@ -22,6 +22,18 @@ from EnumsLine import NodeState
 from line_config_v3 import CLASSES
 
 ok_all = True
+def same(x, y):
+    """Порівняння словників метрик з урахуванням NaN (NaN != NaN, напр. crew_util при crew=None)."""
+    if x.keys() != y.keys():
+        return False
+    for k in x:
+        u, v = x[k], y[k]
+        if isinstance(u, float) and isinstance(v, float) and math.isnan(u) and math.isnan(v):
+            continue
+        if u != v:
+            return False
+    return True
+
 def report(cond, msg):
     global ok_all
     print(("  OK   " if cond else "  FAIL ") + msg); ok_all &= bool(cond)
@@ -32,12 +44,12 @@ PERIODIC = {"C1": 800 * H, "C2": 300 * H, "C3": 5000 * H, "C4": 1500 * H, "C6": 
 print("(L1) детермінованість")
 a = run_v3(7, NoPM(), horizon_h=1500, warmup_h=100)
 b = run_v3(7, NoPM(), horizon_h=1500, warmup_h=100)
-report(a == b, f"seed=7 двічі: дрони {a['drones']} = {b['drones']}, усі метрики однакові")
+report(same(a, b), f"seed=7 двічі: дрони {a['drones']} = {b['drones']}, усі метрики однакові")
 
 print("(L2) журнал подій не змінює траєкторію")
 path = os.path.join(tempfile.mkdtemp(), "v3.jsonl.gz")
 c = run_v3(7, NoPM(), horizon_h=1500, warmup_h=100, logger_path=path)
-report(a == c, f"з журналом: дрони {c['drones']}, метрики однакові; журнал {os.path.getsize(path)/1024:.0f} КБ")
+report(same(a, c), f"з журналом: дрони {c['drones']}, метрики однакові; журнал {os.path.getsize(path)/1024:.0f} КБ")
 
 print("(L3) інваріант черги запитів при опортуністичному ТО")
 pol = OpportunisticPM({k: 0.05 for k in CLASSES}, {k: 0.5 for k in CLASSES})

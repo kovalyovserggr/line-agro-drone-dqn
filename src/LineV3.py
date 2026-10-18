@@ -198,6 +198,178 @@ class ProductionNodeV3(ProductionNode):
 
     # ---- головний цикл -------------------------------------------------------
     def tick(self, current_time: float, is_point: int):
+        lr = getattr(self, "line_ref", None)
+        if lr is not None and getattr(lr, "time_carry", False):
+            return self._tick_carry(current_time)
+        return self._tick_legacy(current_time, is_point)
+
+    def _tick_carry(self, now: float):
+        """Р39: такт без втрати часу на переходах. Бюджет такту витрачається
+        послідовно на стани вузла; залишок після завершення операції, LETUP, ТО чи
+        ремонту переходить у наступний стан; запит на ресурс задовольняється в тому
+        ж такті, якщо ресурс є на складі. Відмова — у точний момент усередині такту
+        (вік зростає лише під час виконання операції, не під час LETUP)."""
+        budget = now - self.last_time
+        self.last_time = now
+        self._now = now
+        self._delta = budget
+        sd = self.state_durations
+        for _ in range(64):                                # захист від зациклення
+            st = self.status
+            if st == NodeState.WORKING:
+                op = self.current_op
+                if op is None:
+                    self.status = NodeState.IDLE
+                    continue
+                if op.state == OperationState.EXECUTING:
+                    if budget <= 0.0:
+                        break
+                    sf = self.speed_factor()
+                    need = max(0.0, (op.duration - op.progress) * sf)
+                    use = min(budget, need)
+                    to_fail = min(vf - v for vf, v in zip(self.rel.v_fail, self.rel.v))
+                    if to_fail < use:                       # відмова всередині такту
+                        use = max(0.0, to_fail)
+                        sd[NodeState.WORKING] += use
+                        self.op_time_since_pm += use
+                        op.progress += use / sf
+                        budget -= use
+                        failed = self.rel.advance(use + 1e-9)
+                        if failed is None:                  # чисельний край — дотягуємо
+                            failed = int(np.argmin([vf - v for vf, v in zip(self.rel.v_fail, self.rel.v)]))
+                            self.rel.v[failed] = self.rel.v_fail[failed]
+                            self.rel.n_failures[failed] += 1
+                        self.failed_mode = failed
+                        self.n_fail += 1
+                        self._interrupt_v3(NodeState.REPAIR)
+                        continue
+                    self.rel.advance(use)
+                    sd[NodeState.WORKING] += use
+                    self.op_time_since_pm += use
+                    op.progress += use / sf
+                    budget -= use
+                    if use >= need:
+                        op.progress = op.duration
+                        self._complete(op)                  # → LETUP, progress = 0
+                        continue
+                    break
+                elif op.state == OperationState.LETUP:
+                    if budget <= 0.0:
+                        break
+                    need = max(0.0, op.duration_letup - op.progress)
+                    use = min(budget, need)
+                    sd[NodeState.WORKING] += use
+                    self.t_setup += use
+                    op.progress += use
+                    budget -= use
+                    if use >= need:
+                        op.progress = 0.0
+                        op.state = OperationState.IDLE
+                        self.current_op = None
+                        self.status = NodeState.IDLE
+                        continue
+                    break
+                else:
+                    self.status = NodeState.IDLE
+                    continue
+
+            elif st == NodeState.MAINTENANCE:
+                if budget <= 0.0:
+                    break
+                need = max(0.0, self.cur_dur - self.progress)
+                use = min(budget, need)
+                sd[st] += use
+                self.progress += use
+                budget -= use
+                if use >= need:
+                    self.rel.preventive_maintenance()
+                    self.op_time_since_pm = 0.0
+                    self.status = NodeState.IDLE
+                    self.progress = 0.0
+                    if self.line is not None:
+                        self.line.crew_release()
+                    continue
+                break
+
+            elif st == NodeState.REPAIR:
+                if budget <= 0.0:
+                    break
+                if self.awaiting_crew:
+                    sd[st] += budget
+                    self.t_crew_wait += budget
+                    budget = 0.0
+                    break
+                need = max(0.0, self.cur_dur - self.progress)
+                use = min(budget, need)
+                sd[st] += use
+                self.progress += use
+                budget -= use
+                if use >= need:
+                    self.rel.corrective_repair(self.failed_mode)
+                    self.failed_mode = None
+                    self.status = NodeState.IDLE
+                    self.progress = 0.0
+                    if self.line is not None:
+                        self.line.crew_release()
+                    continue
+                break
+
+            elif st == NodeState.WAITING_FOR_RESOURCE:
+                op = self.current_op
+                if op is not None and op.state != OperationState.EXECUTING:
+                    self.line_ref.allocate_pass()           # ресурс міг з'явитися в цьому такті
+                if op is not None and op.state == OperationState.EXECUTING:
+                    op.progress = 0.0
+                    self.status = NodeState.WORKING
+                    self.wait_since = None
+                    self.next_wait_decision = None
+                    continue
+                d_next = op.duration if op is not None else 0.0
+                if self._idle_wait_epoch(now, d_next):
+                    self._do_pm(waiting=True)
+                    continue
+                sd[st] += budget
+                budget = 0.0
+                break
+
+            elif st == NodeState.IDLE:
+                candidates = [op for op in self.operations if op.state == OperationState.IDLE
+                              and self.planner.can_accept(op.name)]
+                if not candidates:
+                    if self._idle_wait_epoch(now, 0.0):
+                        self._do_pm(waiting=True)
+                        continue
+                    sd[st] += budget
+                    budget = 0.0
+                    break
+                self.wait_since = None
+                self.next_wait_decision = None
+                self._sort_candidates(candidates)
+                if self._ask(E1, candidates[0].duration) == PM:
+                    self._do_pm(waiting=False)
+                    continue
+                placed = False
+                for op in candidates:
+                    if self.planner.process_request(RequestRes(self.id, op.name, op.input_resources, op.callback),
+                                                    self.res_manager):
+                        self.current_op = op
+                        self.status = NodeState.WAITING_FOR_RESOURCE
+                        self.reserved[op.name] = self.reserved.get(op.name, 0) + (1000 if op.name == "Type0" else 1)
+                        placed = True
+                        break
+                if placed:
+                    continue
+                sd[st] += budget
+                budget = 0.0
+                break
+            else:
+                sd[st] += budget
+                budget = 0.0
+                break
+        if budget > 0.0:                                   # не мало б траплятися; облік часу не губимо
+            sd[self.status] += budget
+
+    def _tick_legacy(self, current_time: float, is_point: int):
         delta = current_time - self.last_time
         self.last_time = current_time
         self._delta = delta
@@ -352,7 +524,7 @@ class AgroDroneLineV3(AgroDroneLine):
     def __init__(self, master_seed: int, policy, n_filament_suppliers: int = 5,
                  buffer_drones: float = 2.0, type0_cap: float | str = "auto", classes: dict | None = None,
                  node_overrides: dict | None = None, crew: int | None = None, dispatch: str = "D17",
-                 n_printers: int = 15):
+                 n_printers: int = 15, time_carry: bool = False):
         with contextlib.redirect_stdout(io.StringIO()):
             super().__init__(seed=None, lim_drones_made=10**9, T_pm_print_park=None,
                              verbose=False, n_filament_suppliers=n_filament_suppliers,
@@ -361,6 +533,8 @@ class AgroDroneLineV3(AgroDroneLine):
         self.drone_times: list[float] = []
         # правило диспетчеризації (тест резерву, Р36); окремий RNG — не зсуває інші потоки
         self.dispatch = dispatch
+        # Р39: такт без втрати часу на переходах (False — поведінка до Р39)
+        self.time_carry = time_carry
         self.dispatch_rng = np.random.default_rng([master_seed, 777])
         # ремонтна бригада (Р30): crew=None — необмежена (поведінка до Р30)
         self.crew = crew
@@ -410,6 +584,22 @@ class AgroDroneLineV3(AgroDroneLine):
             nxt = self.crew_queue.pop(0)
             self.crew_busy += 1
             nxt.awaiting_crew = False
+
+    def allocate_pass(self):
+        """Р39: прохід розподілу ресурсів посеред такту — та сама логіка і той самий
+        пріоритет черги (за часом очікування), що й ResourceManager.tick, але без
+        збільшення лічильників очікування."""
+        rm = self.res_manager
+        done = []
+        for item in sorted(rm.requests, key=lambda x: x.wait_ticks, reverse=True):
+            ok = all((rm.resources[r].number() if rm.resources[r] is not None else 0) >= q
+                     for r, q in item.input_resources.items())
+            if ok:
+                used = {r: rm.resources[r].get(q) for r, q in item.input_resources.items()}
+                done.append(item)
+                item.callback(used)
+        for r in done:
+            rm.requests.remove(r)
 
     def _stock(self, name):
         pool = self.res_manager.resources.get(name)

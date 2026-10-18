@@ -41,13 +41,13 @@ def make_policy(kind, param, Tstar):
 
 
 def job(args):
-    scenario, kind, param, seed, crew, dispatch, cap0, n_pr = args
+    scenario, kind, param, seed, crew, dispatch, cap0, n_pr, tc = args
     cl, ov = scenario_classes(scenario)
     Tstar = class_T_star_seconds(cl)
     t0 = time.time()
     m = run_v3(seed, make_policy(kind, param, Tstar), horizon_h=WARMUP_H + WINDOW_H, warmup_h=WARMUP_H,
-               classes=cl, node_overrides=ov, crew=crew, dispatch=dispatch, type0_cap=cap0, n_printers=n_pr)
-    m.update({"scenario": scenario, "policy": kind, "param": param, "seed": seed, "dispatch": dispatch, "type0_cap": cap0, "n_printers": n_pr,
+               classes=cl, node_overrides=ov, crew=crew, dispatch=dispatch, type0_cap=cap0, n_printers=n_pr, time_carry=tc)
+    m.update({"scenario": scenario, "policy": kind, "param": param, "seed": seed, "dispatch": dispatch, "type0_cap": cap0, "n_printers": n_pr, "time_carry": tc,
               "wall_s": round(time.time() - t0, 1)})
     return m
 
@@ -64,13 +64,14 @@ def main():
     ap.add_argument("--policies", nargs="+", default=["B0", "B1", "B2", "B3"])
     ap.add_argument("--dispatch", nargs="+", default=["D17"], help="правила диспетчеризації: D17 list quota random")
     ap.add_argument("--type0-cap", default="auto", help="кеп філаменту: auto — на buffer_drones дронів (Р38); або число, г (4000 — серії до a3-v0.10)")
+    ap.add_argument("--time-carry", type=int, default=1, help="1 — такт без втрат на переходах (Р39), 0 — як до Р39")
     ap.add_argument("--n-printers", nargs="+", type=int, default=[15], help="кількість принтерів (вісь сценаріїв, Р38)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     crews = [None if c == "inf" else int(c) for c in a.crew]
     grid = {"B0": [0.0], "B1": a.b1, "B2": a.b2, "B3": a.b3}
     cap0 = a.type0_cap if a.type0_cap == "auto" else float(a.type0_cap)
-    jobs = [(a.scenario, k, p, s, c, dsp, cap0, npr) for npr in a.n_printers for dsp in a.dispatch for c in crews
+    jobs = [(a.scenario, k, p, s, c, dsp, cap0, npr, bool(a.time_carry)) for npr in a.n_printers for dsp in a.dispatch for c in crews
             for k in a.policies for p in grid[k] for s in a.seeds]
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     writer, f, done = None, open(a.out, "w", newline=""), 0

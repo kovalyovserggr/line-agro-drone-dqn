@@ -46,12 +46,12 @@ def bom_need(line):
 
 
 def job(a):
-    disp, kind, param, seed, buf, cap0, scale, n_pr, dt = a
+    disp, kind, param, seed, buf, cap0, scale, n_pr, dt, tc = a
     cl, ov = scenario_classes("moderate")
     pol = make_policy(kind, param, class_T_star_seconds(cl))
     t0 = time.time()
     line = AgroDroneLineV3(seed, pol, classes=cl, node_overrides=ov, crew=1, dispatch=disp,
-                           buffer_drones=buf, type0_cap=cap0, n_printers=n_pr)
+                           buffer_drones=buf, type0_cap=cap0, n_printers=n_pr, time_carry=tc)
     n_ticks = int(round((WARMUP_H + WINDOW_H) * scale * 3600 / dt))
     warm = int(round(WARMUP_H * scale * 3600 / dt))
     t, s0 = 0.0, None
@@ -65,7 +65,7 @@ def job(a):
     m = line_metrics(s0, s1, line)
     T = s1["t"] - s0["t"]
     row = {"dispatch": disp, "policy": kind, "param": param, "seed": seed, "buffer_drones": buf,
-           "type0_cap": cap0 if cap0 == "auto" else int(cap0), "n_printers": n_pr, "dt": dt, "throughput_per_week": m["throughput_per_week"], "profit": m["profit"],
+           "type0_cap": cap0 if cap0 == "auto" else int(cap0), "n_printers": n_pr, "dt": dt, "time_carry": tc, "throughput_per_week": m["throughput_per_week"], "profit": m["profit"],
            "OEE": m["OEE"]}
     # розклад часу за класами (частки календарного часу вікна)
     by_cls = {}
@@ -140,15 +140,16 @@ def main():
     ap.add_argument("--seeds", nargs="+", type=int, default=[1000, 1001, 1002])
     ap.add_argument("--n-printers", nargs="+", type=int, default=[15])
     ap.add_argument("--dt", nargs="+", type=float, default=[100.0], help="крок такту, с (перевірка чутливості, Р38)")
+    ap.add_argument("--time-carry", nargs="+", type=int, default=[1], help="1 — такт без втрат на переходах (Р39), 0 — як до Р39")
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--horizon-scale", type=float, default=1.0, help="лише для димового тесту (<1)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     caps = [c if c == "auto" else float(c) for c in a.type0_cap]
     pols = [(p.split(":")[0], float(p.split(":")[1])) for p in a.policies]
-    jobs = [(d, k, prm, s, b, c, a.horizon_scale, npr, dt)
-            for (k, prm), npr, dt, d, b, c, s in itertools.product(pols, a.n_printers, a.dt, a.dispatch,
-                                                                    a.buffer, caps, a.seeds)]
+    jobs = [(d, k, prm, s, b, c, a.horizon_scale, npr, dt, bool(tc))
+            for (k, prm), tc, npr, dt, d, b, c, s in itertools.product(pols, a.time_carry, a.n_printers, a.dt,
+                                                                        a.dispatch, a.buffer, caps, a.seeds)]
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     rows, writer = [], None
     with open(a.out, "w", newline="") as f, Pool(a.workers) as pool:
@@ -156,23 +157,23 @@ def main():
             if writer is None:
                 writer = csv.DictWriter(f, fieldnames=list(r)); writer.writeheader()
             writer.writerow(r); f.flush(); rows.append(r)
-            print(f"[{i}/{len(jobs)}] n_pr={r['n_printers']} dt={r['dt']:.0f} {r['dispatch']} buf={r['buffer_drones']} cap0={r['type0_cap']} {r['policy']} "
+            print(f"[{i}/{len(jobs)}] tc={int(r['time_carry'])} n_pr={r['n_printers']} dt={r['dt']:.0f} {r['dispatch']} buf={r['buffer_drones']} cap0={r['type0_cap']} {r['policy']} "
                   f"seed={r['seed']}: {r['throughput_per_week']:.2f} дрон/тиж; принтери C2: робота "
                   f"{r['C2_work']:.3f}, голод {r['C2_starved']:.3f}, блок {r['C2_blocked']:.3f}; "
                   f"екструзія C1: робота {r['C1_work']:.3f}, блок {r['C1_blocked']:.3f} ({r['wall_s']} с)", flush=True)
     # підсумок за конфігураціями
     print("\nСередні за seed (дрон/тиж; частки часу принтерів C2 і екструдерів C1):")
-    keys = sorted({(r["policy"], r["n_printers"], r["dt"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"])) for r in rows})
+    keys = sorted({(r["policy"], r["n_printers"], r["dt"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"]), int(r["time_carry"])) for r in rows})
     for k in keys:
-        g = [r for r in rows if (r["policy"], r["n_printers"], r["dt"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"])) == k]
+        g = [r for r in rows if (r["policy"], r["n_printers"], r["dt"], r["dispatch"], r["buffer_drones"], str(r["type0_cap"]), int(r["time_carry"])) == k]
         mean = lambda f: sum(r[f] for r in g) / len(g)
-        print(f"  {k[0]} n_pr={k[1]:2d} dt={k[2]:4.0f} {k[3]:5s} buf={k[4]:.0f} cap0={k[5]:>6s}: {mean('throughput_per_week'):6.2f} дрон/тиж, "
+        print(f"  {k[0]} tc={k[6]} n_pr={k[1]:2d} dt={k[2]:4.0f} {k[3]:5s} buf={k[4]:.0f} cap0={k[5]:>6s}: {mean('throughput_per_week'):6.2f} дрон/тиж, "
               f"прибуток {mean('profit')/1e3:7.1f} тис. | "
               f"C2 роб {mean('C2_work'):.3f} налаг {mean('C2_setup'):.3f} ТО {mean('C2_pm'):.3f} рем {mean('C2_cm'):.3f} "
               f"голод {mean('C2_starved'):.3f} блок {mean('C2_blocked'):.3f} | "
               f"C1 роб {mean('C1_work'):.3f} голод {mean('C1_starved'):.3f} блок {mean('C1_blocked'):.3f}")
     base = [r for r in rows if r["policy"] == "B3" and r["buffer_drones"] == 2.0 and r["type0_cap"] == "auto"
-            and r["n_printers"] == 15 and r["dt"] == 100.0]
+            and r["n_printers"] == 15 and r["dt"] == 100.0 and r["time_carry"]]
     analytic_bound(base or rows)
 
 
