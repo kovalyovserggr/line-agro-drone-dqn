@@ -65,7 +65,9 @@ def main():
                     help="Р45: різкість обліку за вузьким місцем s (0 — облік Р41 за часом обробки)")
     ap.add_argument("--warmup", type=int, default=1000, help="переходів у буфері до початку навчання")
     ap.add_argument("--eval-seeds", nargs="+", type=int, default=[100000, 100001, 100002, 100003, 100004])
-    ap.add_argument("--eval-only", default=None, help="шлях до model.pt — лише оцінювання")
+    ap.add_argument("--eval-only", action="store_true",
+                    help="лише оцінювання збереженої моделі <out>/model.pt (Р47: валідаційні seed)")
+    ap.add_argument("--eval-name", default="eval.csv", help="ім'я файлу результатів оцінювання в <out>")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.agent_seeds:
@@ -87,10 +89,11 @@ def train_and_eval(a):
     cl, ov = scenario_classes(a.scenario)
     agent = DoubleDQNAgentV3(OBS_DIM, 2, seed=a.agent_seed, lr=a.lr, lr_end=a.lr_end,
                              eps_steps=10**9, total_steps=10**9, buffer=200_000, warmup=a.warmup)
-    with open(os.path.join(a.out, "config.json"), "w") as f:
-        json.dump(vars(a), f, indent=1)
+    if not a.eval_only:                       # конфіг навчання не перезаписуємо при оцінюванні
+        with open(os.path.join(a.out, "config.json"), "w") as f:
+            json.dump(vars(a), f, indent=1)
 
-    if a.eval_only is None:
+    if not a.eval_only:
         env_rng = np.random.default_rng([a.agent_seed, 4242])
         log = open(os.path.join(a.out, "train_log.csv"), "w", newline="")
         w = None
@@ -137,7 +140,7 @@ def train_and_eval(a):
             torch.save(agent.online.state_dict(), os.path.join(a.out, "model.pt"))
         log.close()
     else:
-        agent.online.load_state_dict(torch.load(a.eval_only))
+        agent.online.load_state_dict(torch.load(os.path.join(a.out, "model.pt")))
 
     # оцінювання: жадібна політика, протокол бейслайнів
     pol = DQNPMPolicy(agent, train=False, grid=a.grid)
@@ -152,7 +155,7 @@ def train_and_eval(a):
         rows.append(m)
         print(f"оцінка seed {s}: {m['throughput_per_week']:.2f} дрон/тиж, прибуток {m['profit']/1e3:.1f} тис., "
               f"ТО {m['pm']}, відмов {m['failures']}", flush=True)
-    with open(os.path.join(a.out, "eval.csv"), "w", newline="") as f:
+    with open(os.path.join(a.out, a.eval_name), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
     print(f"середній прибуток {np.mean([r['profit'] for r in rows])/1e3:.1f} тис. USD/рік")
 
