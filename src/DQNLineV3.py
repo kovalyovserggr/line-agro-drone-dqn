@@ -37,6 +37,18 @@ def _ref_duration(node) -> float:
     return node._ref_d
 
 
+GRID = 0.025   # ширина клітинки сітки рішень за v/η (Р43); оновлюється політикою
+
+
+def _grid_horizon(node) -> float:
+    """Напрацювання до наступного рішення: GRID × η зносової складової з найбільшим v/η."""
+    best, eta = -1.0, 24 * H
+    for m, v in zip(node.rel.modes, node.rel.v):
+        if m.q_pm < 1.0 and v / m.eta > best:
+            best, eta = v / m.eta, m.eta
+    return max(GRID * eta, H)
+
+
 def observe(node, epoch: str, d_next: float, now: float) -> np.ndarray:
     line = node.line_ref
     cfg = node.cfg
@@ -47,7 +59,7 @@ def observe(node, epoch: str, d_next: float, now: float) -> np.ndarray:
     r = node.wear_ratio()
     x[i + 0] = min(r, 3.0)                                       # нормований вік
     x[i + 1] = node.rel.p_fail(d)                                # ризик відмови на наступній операції
-    x[i + 2] = node.rel.p_fail(24 * H)                           # ризик відмови за добу роботи
+    x[i + 2] = node.rel.p_fail(_grid_horizon(node))              # ризик відмови до наступного рішення (Р43)
     x[i + 3] = 1.0 - math.exp(-r)                                # рівень деградації якості (0…1)
     x[i + 4] = (node.speed_factor() - 1.0) * 5.0                 # уповільнення
     # момент рішення: E1 / очікування ресурсу / блокування буфером
@@ -89,7 +101,7 @@ class DQNPMPolicy:
     SMDP-переходи кожного вузла в буфер агента і викликає train_step."""
 
     def __init__(self, agent, tau_h: float = 200.0, train: bool = True, train_every: int = 4,
-                 reward_scale: float = 1e-3):
+                 reward_scale: float = 1e-3, grid: float = 0.0):
         self.agent, self.tau, self.train = agent, tau_h * H, train
         self.train_every, self.k = train_every, reward_scale
         self.pending = {}            # node.id -> (obs, action, time, r_acc)
@@ -99,12 +111,31 @@ class DQNPMPolicy:
         # тож оптимальна політика не змінюється; зникає хибна перевага довгих переходів
         # (після ТО наступне рішення вузла настає лише через ~1% η напрацювання).
         self.rho = {}
+        # Р43: сітка рішень за зношеністю. Вузол «питають» лише тоді, коли його
+        # нормований вік v/η перейшов у нову клітинку ширини grid (після ТО відлік
+        # починається заново). Між рішеннями — CONTINUE. Без сітки рішення приходять
+        # на кожній операції (~0.0003η для принтера), і різниця Q(PM) − Q(CONTINUE)
+        # за один крок тоне в шумі оцінки (DQN фактично не робить ТО — a3-dqn-np15-L).
+        # grid = 0 — без сітки (поведінка Р41).
+        self.grid = grid
+        self.cell = {}
+        if grid > 0:
+            global GRID
+            GRID = grid
         self.n_dec = 0
         self.n_pm = 0
         self.losses = []
         self.name = "DQN"
 
     def decide(self, node, epoch, d_next):
+        if self.grid > 0:
+            c = int(node.wear_ratio() / self.grid)
+            lc = self.cell.get(node.id, -1)
+            if c < lc:                       # після ТО — новий відлік
+                self.cell[node.id] = lc = c
+            if c <= lc:
+                return CONTINUE
+            self.cell[node.id] = c
         now = node._now
         obs = observe(node, epoch, d_next, now)
         if self.train:

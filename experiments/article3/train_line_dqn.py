@@ -47,10 +47,12 @@ def main():
     ap.add_argument("--ep-hours", type=float, default=4368.0, help="тривалість навчального епізоду (26 тижнів)")
     ap.add_argument("--tau-h", type=float, default=200.0, help="стала дисконтування SMDP, год")
     ap.add_argument("--dt", type=float, default=DT)
+    ap.add_argument("--grid", type=float, default=0.025, help="сітка рішень за v/η (Р43); 0 — рішення на кожній операції (Р41)")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--lr-end", type=float, default=3e-5)
     ap.add_argument("--eps-frac", type=float, default=0.4, help="частка навчання, за яку ε згасає до 0.05")
-    ap.add_argument("--train-every", type=int, default=4)
+    ap.add_argument("--train-every", type=int, default=1)
+    ap.add_argument("--warmup", type=int, default=1000, help="переходів у буфері до початку навчання")
     ap.add_argument("--eval-seeds", nargs="+", type=int, default=[100000, 100001, 100002, 100003, 100004])
     ap.add_argument("--eval-only", default=None, help="шлях до model.pt — лише оцінювання")
     ap.add_argument("--out", required=True)
@@ -73,7 +75,7 @@ def train_and_eval(a):
     os.makedirs(a.out, exist_ok=True)
     cl, ov = scenario_classes(a.scenario)
     agent = DoubleDQNAgentV3(OBS_DIM, 2, seed=a.agent_seed, lr=a.lr, lr_end=a.lr_end,
-                             eps_steps=10**9, total_steps=10**9, buffer=200_000, warmup=5_000)
+                             eps_steps=10**9, total_steps=10**9, buffer=200_000, warmup=a.warmup)
     with open(os.path.join(a.out, "config.json"), "w") as f:
         json.dump(vars(a), f, indent=1)
 
@@ -81,7 +83,7 @@ def train_and_eval(a):
         env_rng = np.random.default_rng([a.agent_seed, 4242])
         log = open(os.path.join(a.out, "train_log.csv"), "w", newline="")
         w = None
-        pol = DQNPMPolicy(agent, tau_h=a.tau_h, train=True, train_every=a.train_every)
+        pol = DQNPMPolicy(agent, tau_h=a.tau_h, train=True, train_every=a.train_every, grid=a.grid)
         # початкова оцінка ρ_c — калібрувальний епізод без ТО (B0), щоб уже перші
         # переходи в буфері мали правильний зсув
         from LineV3 import NoPM
@@ -90,7 +92,7 @@ def train_and_eval(a):
         print("ρ_c (USD/год на вузол):", {k: round(v * 3600, 2) for k, v in sorted(pol.rho.items())}, flush=True)
         for ep in range(a.episodes):
             seed = int(env_rng.integers(0, 10000))
-            pol.pending, pol.losses, pol.n_pm = {}, [], 0
+            pol.pending, pol.losses, pol.n_pm, pol.cell = {}, [], 0, {}
             # ε — лінійно за епізодами: 1 → 0.05 за перші eps_frac·episodes епізодів, далі 0.05
             agent.eps_fixed = max(0.05, 1.0 - 0.95 * ep / max(1.0, a.eps_frac * a.episodes))
             d0, t0 = pol.n_dec, time.time()
@@ -119,11 +121,11 @@ def train_and_eval(a):
         agent.online.load_state_dict(torch.load(a.eval_only))
 
     # оцінювання: жадібна політика, протокол бейслайнів
-    pol = DQNPMPolicy(agent, train=False)
+    pol = DQNPMPolicy(agent, train=False, grid=a.grid)
     rows = []
     for s in a.eval_seeds:
         t0 = time.time()
-        pol.n_pm = 0
+        pol.n_pm, pol.cell = 0, {}
         m = run_v3(s, pol, horizon_h=WARMUP_H + WINDOW_H, warmup_h=WARMUP_H, classes=cl, node_overrides=ov,
                    crew=1, n_printers=a.n_printers, dt=a.dt)
         m.update({"scenario": a.scenario, "policy": "DQN", "param": a.agent_seed, "seed": s,
