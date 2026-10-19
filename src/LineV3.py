@@ -602,28 +602,39 @@ class AgroDroneLineV3(AgroDroneLine):
             self.crew_busy += 1
             nxt.awaiting_crew = False
 
-    def _build_value_tables(self):
+    def _build_value_tables(self, class_weight: dict | None = None):
         """Р41: втілена цінність ресурсів (ідеальний час обробки за BOM) у USD:
         V(Type22) = drone_value. value_added_usd[op] — внесок однієї придатної
-        операції; сума внесків за BOM одного дрона = drone_value."""
-        ops = {}
+        операції; сума внесків за BOM одного дрона = drone_value.
+        Р45: class_weight {клас: множник} — внесок операції = тривалість × множник
+        класу вузла, що її виконує (облік за вузьким місцем); після нормування сума
+        за BOM дрона як і раніше = drone_value. None — усі множники 1 (Р41)."""
+        ops, cls_of = {}, {}
         for n in self.units:
             for op in n.operations:
                 ops.setdefault(op.name, op)
+                cls_of.setdefault(op.name, getattr(n, "cls", None) or __import__("line_config_v3").node_class(n.id))
+        w = class_weight or {}
+        credit = {name: ops[name].duration * w.get(cls_of[name], 1.0) for name in ops}
         out_q = lambda name: 1000.0 if name == "Type0" else 1.0
         memo = {}
-        def V(name):                                   # секунди втіленої обробки на одиницю
+        def V(name):                                   # втілений «кредит» на одиницю
             if name not in ops:
                 return 0.0                             # сировина (TypePL)
             if name not in memo:
                 op = ops[name]
-                memo[name] = (op.duration + sum(q * V(r) for r, q in op.input_resources.items())) / out_q(name)
+                memo[name] = (credit[name] + sum(q * V(r) for r, q in op.input_resources.items())) / out_q(name)
             return memo[name]
         total = V("Type22")
         k = ECONOMICS["drone_value"] / total
         self.value_usd = {name: V(name) * k for name in ops}
-        self.value_added_usd = {name: ops[name].duration * k for name in ops}
+        self.value_added_usd = {name: credit[name] * k for name in ops}
         self.value_total_s = total
+        self.value_class_weight = dict(w)
+
+    def set_value_weights(self, class_weight: dict):
+        """Р45: перебудувати таблиці цінності з множниками класів."""
+        self._build_value_tables(class_weight)
 
     def _status_counts(self) -> dict:
         """Р41: глобальні ознаки для агента (кеш на такт): частка вузлів у ТО/ремонті

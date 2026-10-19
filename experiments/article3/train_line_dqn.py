@@ -25,9 +25,18 @@ from DQNLineV3 import DQNPMPolicy, OBS_DIM
 WARMUP_H, WINDOW_H = 26 * 7 * 24, 8760
 
 
+class _CalPolicy:
+    """Калібрувальний епізод B0 з обліком цінності DQN-політики (Р45)."""
+    def __init__(self, pol): self.pol, self.name = pol, "cal"
+    def prepare(self, line): self.pol.prepare(line)
+    def decide(self, node, epoch, d_next): return 0
+
+
 def run_episode(seed, policy, hours, cl, ov, n_printers, dt):
     with contextlib.redirect_stdout(io.StringIO()):
         line = AgroDroneLineV3(seed, policy, classes=cl, node_overrides=ov, crew=1, n_printers=n_printers)
+        if hasattr(policy, "prepare"):
+            policy.prepare(line)
         s0 = _snapshot(line)
         t = 0.0
         for _ in range(int(round(hours * 3600 / dt))):
@@ -52,6 +61,8 @@ def main():
     ap.add_argument("--lr-end", type=float, default=3e-5)
     ap.add_argument("--eps-frac", type=float, default=0.4, help="частка навчання, за яку ε згасає до 0.05")
     ap.add_argument("--train-every", type=int, default=1)
+    ap.add_argument("--ta", type=float, default=0.0,
+                    help="Р45: різкість обліку за вузьким місцем s (0 — облік Р41 за часом обробки)")
     ap.add_argument("--warmup", type=int, default=1000, help="переходів у буфері до початку навчання")
     ap.add_argument("--eval-seeds", nargs="+", type=int, default=[100000, 100001, 100002, 100003, 100004])
     ap.add_argument("--eval-only", default=None, help="шлях до model.pt — лише оцінювання")
@@ -88,6 +99,11 @@ def train_and_eval(a):
         # переходи в буфері мали правильний зсув
         from LineV3 import NoPM
         _, cal = run_episode(int(env_rng.integers(0, 10000)), NoPM(), a.ep_hours / 2, cl, ov, a.n_printers, a.dt)
+        pol.ta_sharpness = a.ta
+        if a.ta > 0:                                  # Р45: зайнятість класів → множники цінності; ρ_c — у новому обліку
+            pol.update_util(cal, w=1.0)
+            _, cal = run_episode(int(env_rng.integers(0, 10000)), _CalPolicy(pol), a.ep_hours / 2, cl, ov, a.n_printers, a.dt)
+            print("Р45 множники класів:", {k: round(v, 3) for k, v in sorted(pol.ta_weights().items())}, flush=True)
         pol.update_rho(cal, a.ep_hours / 2 * 3600, w=1.0)
         print("ρ_c (USD/год на вузол):", {k: round(v * 3600, 2) for k, v in sorted(pol.rho.items())}, flush=True)
         for ep in range(a.episodes):
@@ -100,6 +116,8 @@ def train_and_eval(a):
             # ρ_c: за епізодом із B3-подібною поведінкою було б краще, але досить і
             # згладженої оцінки за власними епізодами (зсув не змінює оптимальну політику)
             pol.update_rho(line, a.ep_hours * 3600)
+            if a.ta > 0:
+                pol.update_util(line)
             n_ep = pol.n_dec - d0
             # lr — лінійно до lr_end за оцінкою загальної кількості кроків (оновлюється щоепізоду)
             agent.total_steps = max(agent.steps, int(pol.n_dec / (ep + 1) * a.episodes))
@@ -108,7 +126,8 @@ def train_and_eval(a):
                    "loss": float(np.mean(pol.losses)) if pol.losses else float("nan"),
                    "profit_k": m["profit"] / 1e3, "throughput": m["throughput_per_week"],
                    "OEE": m["OEE"], "failures": m["failures"],
-                   "rho_C2_per_h": pol.rho.get("C2", 0.0) * 3600, "wall_s": round(time.time() - t0, 1)}
+                   "rho_C2_per_h": pol.rho.get("C2", 0.0) * 3600,
+                   "ta_w": json.dumps({k: round(v, 4) for k, v in pol.ta_weights().items()}) if a.ta > 0 else "", "wall_s": round(time.time() - t0, 1)}
             if w is None:
                 w = csv.DictWriter(log, fieldnames=list(row)); w.writeheader()
             w.writerow(row); log.flush()

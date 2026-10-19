@@ -168,3 +168,31 @@ class DQNPMPolicy:
         for c in acc:
             r = acc[c] / cnt[c] / elapsed_s
             self.rho[c] = r if c not in self.rho else (1 - w) * self.rho[c] + w * r
+
+    # ---- Р45: облік за вузьким місцем (throughput accounting) -----------------
+    def prepare(self, line):
+        """Викликається на початку навчального епізоду: задає множники класів для
+        обліку цінності (якщо ta_sharpness > 0)."""
+        if getattr(self, "ta_sharpness", 0.0) > 0 and getattr(self, "util", None):
+            line.set_value_weights(self.ta_weights())
+
+    def ta_weights(self) -> dict:
+        s = self.ta_sharpness
+        umax = max(self.util.values())
+        return {c: math.exp(s * (u - umax)) for c, u in self.util.items()}
+
+    def update_util(self, line, w: float = 0.5):
+        """Зайнятість класу u_c = частка часу вузлів класу НЕ в простої (робота,
+        переналагодження, ТО, ремонт) — за підсумком епізоду, зі згладжуванням."""
+        busy, tot = {}, {}
+        for n in line.units:
+            d = n.state_durations
+            b = d[NodeState.WORKING] + d[NodeState.MAINTENANCE] + d[NodeState.REPAIR]
+            t = b + d[NodeState.IDLE] + d[NodeState.WAITING_FOR_RESOURCE]
+            busy[n.cls] = busy.get(n.cls, 0.0) + b
+            tot[n.cls] = tot.get(n.cls, 0.0) + t
+        if not hasattr(self, "util") or self.util is None:
+            self.util = {}
+        for c in busy:
+            u = busy[c] / tot[c] if tot[c] > 0 else 0.0
+            self.util[c] = u if c not in self.util else (1 - w) * self.util[c] + w * u
