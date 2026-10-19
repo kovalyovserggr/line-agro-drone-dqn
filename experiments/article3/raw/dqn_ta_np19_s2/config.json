@@ -1,0 +1,26 @@
+{
+ "agent_seeds": null,
+ "scenario": "moderate",
+ "n_printers": 19,
+ "agent_seed": 2,
+ "episodes": 40,
+ "ep_hours": 4368.0,
+ "tau_h": 300.0,
+ "dt": 100.0,
+ "grid": 0.025,
+ "lr": 0.0003,
+ "lr_end": 3e-05,
+ "eps_frac": 0.4,
+ "train_every": 1,
+ "ta": 20.0,
+ "warmup": 1000,
+ "eval_seeds": [
+  100000,
+  100001,
+  100002,
+  100003,
+  100004
+ ],
+ "eval_only": null,
+ "out": "experiments/article3/raw/dqn_ta_np19_s2"
+}
