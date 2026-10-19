@@ -8,8 +8,9 @@
 | Fig. 1 | Схема підходу: модель, SMDP, агент, бейслайни | — (схема) | — | — | заплановано |
 | Fig. 2 | Структура лінії з класами вузлів | — (схема) | — | — | заплановано |
 | Fig. 3 | h(t) за класами, ефект ТО за Kijima | TBD | — | — | заплановано |
-| Fig. 4 | Криві навчання (3 seed агента) | TBD | TBD | TBD | заплановано |
-| Fig. 5 | Boxplot makespan/OEE: DQN проти B0–B5 | TBD | TBD | TBD | заплановано |
+| Fig. 4 | Криві навчання DQN-TA, 3 агенти, 4 сценарії (fig_learning) | experiments/article3/make_figures.py | a3-dqn-ta-map-L | a3-v0.19-tamap | чернетка |
+| Fig. 5 | Карта сценаріїв: прибуток і різниця до B1* за кількістю принтерів (fig_scenario_map) | experiments/article3/make_figures.py | a3-test-finalists-L, a3-dqn-ta-map-L, a3-dqn-grid-* | a3-v0.19-tamap | чернетка |
+| Fig. 5a | Абляція винагороди: OEE екструзії і друку за 17 принтерів (fig_ablation17) | experiments/article3/make_figures.py | a3-test-finalists-L, a3-dqn-grid-np12-np17-L, a3-dqn-ta-map-L | a3-v0.19-tamap | чернетка |
 | Fig. 6 | Теплова карта чутливості (β × d_pm/d_cm) | TBD | TBD | TBD | заплановано |
 | Fig. 7 | Вік у момент ТО проти аналітичного оптимуму | TBD | TBD | TBD | заплановано |
 | Fig. 8 | Фрагмент Ганта: DQN проти найкращого бейслайну | TBD | TBD | TBD | заплановано |
@@ -18,3 +19,6 @@
 | Table 3 | Гіперпараметри | — | — | — | заплановано |
 | Table 4 | Основні результати зі статистикою | TBD | TBD | TBD | заплановано |
 | Table 5 | Узагальнення на відкладених наборах параметрів | TBD | TBD | TBD | заплановано |
+
+Рисунки: `docs/article3/figures/` (PNG 300 dpi + PDF). Палітра — категоріальна, перевірена валідатором
+(CVD ΔE ≥ 9.2, normal-vision ≥ 27.6; aqua < 3:1 до тла → кожна серія має також власний маркер).
