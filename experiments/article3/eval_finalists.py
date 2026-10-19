@@ -9,6 +9,7 @@
 Ці seed не використовувались ні для налаштування бейслайнів, ні для навчання DQN.
 
 Запуск (L): PYTHONPATH=src python experiments/article3/eval_finalists.py --workers 3 --out experiments/article3/raw/test_finalists_L.csv
+Інший сценарій (Р46): --scenario strong --n-printers 15 --finalists B0 B1:0.35 B1:0.5 B2:0.001 B1* --b1star '{"C1":1.0,"C2":0.35}' 
 """
 import argparse, csv, json, os, sys, time
 from multiprocessing import Pool
@@ -26,12 +27,13 @@ FINALISTS = [("B0", 0.0, None), ("B1", 0.5, None), ("B2", 1e-3, None), ("B3+", 0
 
 
 def job(a):
-    name, param, b3m, n_pr, seed = a
-    cl, ov = scenario_classes("moderate")
+    name, param, b3m, n_pr, seed, scenario, b1star = a
+    cl, ov = scenario_classes(scenario)
     T = class_T_star_seconds(cl)
     if name == "B1*":
-        pol = PeriodicPM({c: m * T[c] for c, m in B1STAR[n_pr].items()})
-        param = json.dumps(B1STAR[n_pr], sort_keys=True)
+        mult = b1star or B1STAR[n_pr]
+        pol = PeriodicPM({c: m * T[c] for c, m in mult.items()})
+        param = json.dumps(mult, sort_keys=True)
     elif name == "B3+":
         pol = make_policy("B3", param, T, b3m)
     else:
@@ -39,7 +41,7 @@ def job(a):
     t0 = time.time()
     m = run_v3(seed, pol, horizon_h=WARMUP_H + WINDOW_H, warmup_h=WARMUP_H, classes=cl, node_overrides=ov,
                crew=1, n_printers=n_pr)
-    m.update({"policy": name, "param": param, "b3_m": b3m if b3m else "", "n_printers": n_pr, "seed": seed,
+    m.update({"scenario": scenario, "policy": name, "param": param, "b3_m": b3m if b3m else "", "n_printers": n_pr, "seed": seed,
               "wall_s": round(time.time() - t0, 1)})
     return m
 
@@ -49,16 +51,31 @@ def main():
     ap.add_argument("--n-printers", nargs="+", type=int, default=[12, 15, 17, 19])
     ap.add_argument("--seeds", nargs="+", type=int, default=[100000, 100001, 100002, 100003, 100004])
     ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--scenario", default="moderate")
+    ap.add_argument("--finalists", nargs="+", default=None,
+                    help="перелік політика:параметр, напр. B0:0 B1:0.35 B1:0.5 B2:0.001 B1* (за замовчуванням — набір помірного сценарію)")
+    ap.add_argument("--b1star", default=None, help='JSON множників B1* для цього сценарію, напр. {"C1": 1.0, "C2": 0.35}')
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    jobs = [(n, p, b, npr, s) for npr in a.n_printers for (n, p, b) in FINALISTS for s in a.seeds]
+    fins = FINALISTS
+    if a.finalists:
+        fins = []
+        for f_ in a.finalists:
+            nm, _, pr = f_.partition(":")
+            if nm == "B3+":
+                x, _, m_ = pr.partition(",")
+                fins.append(("B3+", float(x), float(m_)))
+            else:
+                fins.append((nm, float(pr) if pr else None, None))
+    b1s = json.loads(a.b1star) if a.b1star else None
+    jobs = [(n, p, b, npr, s, a.scenario, b1s) for npr in a.n_printers for (n, p, b) in fins for s in a.seeds]
     writer, done = None, 0
     with open(a.out, "w", newline="") as f, Pool(a.workers) as pool:
         for m in pool.imap_unordered(job, jobs):
             if writer is None:
                 writer = csv.DictWriter(f, fieldnames=list(m)); writer.writeheader()
             writer.writerow(m); f.flush(); done += 1
-            print(f"[{done}/{len(jobs)}] n_pr={m['n_printers']} {m['policy']} seed={m['seed']}: "
+            print(f"[{done}/{len(jobs)}] {m['scenario']} n_pr={m['n_printers']} {m['policy']} {m['param']} seed={m['seed']}: "
                   f"{m['throughput_per_week']:.2f} дрон/тиж, прибуток {m['profit']/1e3:.1f} тис. ({m['wall_s']} с)",
                   flush=True)
 
