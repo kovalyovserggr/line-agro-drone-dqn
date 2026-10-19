@@ -1,0 +1,23 @@
+{
+ "agent_seeds": null,
+ "scenario": "moderate",
+ "n_printers": 15,
+ "agent_seed": 1,
+ "episodes": 30,
+ "ep_hours": 4368.0,
+ "tau_h": 200.0,
+ "dt": 100.0,
+ "lr": 0.0003,
+ "lr_end": 3e-05,
+ "eps_frac": 0.4,
+ "train_every": 4,
+ "eval_seeds": [
+  100000,
+  100001,
+  100002,
+  100003,
+  100004
+ ],
+ "eval_only": null,
+ "out": "experiments/article3/raw/dqn_np15_s1"
+}
