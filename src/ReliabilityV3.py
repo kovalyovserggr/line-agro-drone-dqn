@@ -13,6 +13,13 @@
 Модуль не залежить від решти симулятора: його перевіряє
 tests/test_reliability_v3.py (MTBF = η·Γ(1+1/β); оптимум заміни за віком
 збігається з аналітичним; при β = 1 профілактика не дає виграшу).
+
+Перевірка робастності (Р49): «справжній» розподіл часу до відмови складової може
+бути логнормальним (ttf = "lognormal") з тими самими середнім і CV, що й Weibull(β, η).
+Тоді випадкові пороги відмов семплюються з логнормального розподілу, а
+cum_hazard / hazard / p_fail (ознаки агента, ризик B2, T* для B1) лишаються
+вейбулівськими — це модель, якою користується обслуговування (хибна специфікація).
+Кількість випадкових чисел на семпл однакова (одне Exp(1)), тож потоки CRN не зсуваються.
 """
 from __future__ import annotations
 
@@ -20,6 +27,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.special import log_ndtr, ndtri
 
 
 @dataclass
@@ -30,6 +38,17 @@ class FailureMode:
     eta: float           # параметр масштабу, с напрацювання
     q_pm: float = 0.0    # Kijima II після ТО: 0 — як нова, 1 — ТО не впливає
     q_cm: float = 0.0    # Kijima II після ремонту цієї складової
+    ttf: str = "weibull"  # «справжній» розподіл порогів відмов: weibull | lognormal (Р49)
+
+    def __post_init__(self):
+        if self.ttf == "lognormal":
+            # логнормальний з тими самими середнім і CV, що й Weibull(β, η)
+            g1, g2 = math.gamma(1 + 1 / self.beta), math.gamma(1 + 2 / self.beta)
+            cv2 = g2 / g1 ** 2 - 1.0
+            self.ln_sigma = math.sqrt(math.log(1.0 + cv2))
+            self.ln_mu = math.log(self.eta * g1) - 0.5 * self.ln_sigma ** 2
+        elif self.ttf != "weibull":
+            raise ValueError(f"невідомий розподіл {self.ttf}")
 
     def cum_hazard(self, v: float) -> float:
         return (v / self.eta) ** self.beta
@@ -47,6 +66,11 @@ class FailureMode:
         """Вік, на якому складова відмовить, за умови, що вона дожила до віку v:
         H(v_f) = H(v) − ln U  ⇒  v_f = η·[(v/η)^β − ln U]^(1/β)."""
         e = rng.exponential(1.0)  # −ln U
+        if self.ttf == "lognormal":
+            # S(v_f) = S(v)·U  ⇒  ln S(v_f) = ln S(v) − e;  S(x) = Φ(−z), z = (ln x − μ)/σ
+            log_s = (float(log_ndtr(-(math.log(v) - self.ln_mu) / self.ln_sigma)) if v > 0 else 0.0) - e
+            z = -float(ndtri(math.exp(log_s)))
+            return math.exp(self.ln_mu + self.ln_sigma * z)
         return self.eta * (self.cum_hazard(v) + e) ** (1.0 / self.beta)
 
 

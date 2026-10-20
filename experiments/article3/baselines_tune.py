@@ -41,13 +41,13 @@ def make_policy(kind, param, Tstar, b3_m=1.0):
 
 
 def job(args):
-    scenario, kind, param, seed, crew, dispatch, cap0, n_pr, tc, b3_m = args
-    cl, ov = scenario_classes(scenario)
+    scenario, kind, param, seed, crew, dispatch, cap0, n_pr, tc, b3_m, ttf = args
+    cl, ov = scenario_classes(scenario, ttf=ttf)
     Tstar = class_T_star_seconds(cl)
     t0 = time.time()
     m = run_v3(seed, make_policy(kind, param, Tstar, b3_m), horizon_h=WARMUP_H + WINDOW_H, warmup_h=WARMUP_H,
                classes=cl, node_overrides=ov, crew=crew, dispatch=dispatch, type0_cap=cap0, n_printers=n_pr, time_carry=tc)
-    m.update({"scenario": scenario, "policy": kind, "param": param, "seed": seed, "dispatch": dispatch, "type0_cap": cap0, "n_printers": n_pr, "time_carry": tc, "b3_m": b3_m if kind == "B3" else "",
+    m.update({"scenario": scenario, "ttf": ttf, "policy": kind, "param": param, "seed": seed, "dispatch": dispatch, "type0_cap": cap0, "n_printers": n_pr, "time_carry": tc, "b3_m": b3_m if kind == "B3" else "",
               "wall_s": round(time.time() - t0, 1)})
     return m
 
@@ -67,12 +67,14 @@ def main():
     ap.add_argument("--time-carry", type=int, default=1, help="1 — такт без втрат на переходах (Р39), 0 — як до Р39")
     ap.add_argument("--b3-m", type=float, default=1.0, help="B3: множник періодичного ТО на E1 (1.0 — аналітичний T*)")
     ap.add_argument("--n-printers", nargs="+", type=int, default=[15], help="кількість принтерів (вісь сценаріїв, Р38)")
+    ap.add_argument("--ttf", default="weibull", choices=["weibull", "lognormal"],
+                    help="«справжній» розподіл часу до відмови зносових складових (Р49)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     crews = [None if c == "inf" else int(c) for c in a.crew]
     grid = {"B0": [0.0], "B1": a.b1, "B2": a.b2, "B3": a.b3}
     cap0 = a.type0_cap if a.type0_cap == "auto" else float(a.type0_cap)
-    jobs = [(a.scenario, k, p, s, c, dsp, cap0, npr, bool(a.time_carry), a.b3_m) for npr in a.n_printers for dsp in a.dispatch for c in crews
+    jobs = [(a.scenario, k, p, s, c, dsp, cap0, npr, bool(a.time_carry), a.b3_m, a.ttf) for npr in a.n_printers for dsp in a.dispatch for c in crews
             for k in a.policies for p in grid[k] for s in a.seeds]
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     writer, f, done = None, open(a.out, "w", newline=""), 0

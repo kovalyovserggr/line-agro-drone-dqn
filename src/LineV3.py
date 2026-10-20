@@ -77,7 +77,7 @@ class ProductionNodeV3(ProductionNode):
         self.rng_q = streams[(idx, "quality")]
         self.rng_pm = streams[(idx, "pm")]
         self.rng_cm = streams[(idx, "repair")]
-        modes = [FailureMode(n, b, eta, qp, qc) for (n, b, eta, qp, qc) in cfg["modes"]]
+        modes = [FailureMode(*m) for m in cfg["modes"]]   # (назва, β, η, q_pm, q_cm[, ttf]) — Р49
         self.rel = NodeReliability(modes, streams[(idx, "failure")])
         self.cur_dur = 0.0           # тривалість поточного ТО/ремонту
         self.failed_mode = None

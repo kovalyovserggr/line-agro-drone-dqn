@@ -9,6 +9,7 @@
 Ці seed не використовувались ні для налаштування бейслайнів, ні для навчання DQN.
 
 Запуск (L): PYTHONPATH=src python experiments/article3/eval_finalists.py --workers 3 --out experiments/article3/raw/test_finalists_L.csv
+Р48 (20 тестових seed): --seeds-range 100005 100020; Р49 (логнормальна «правда»): --ttf lognormal.
 Інший сценарій (Р46): --scenario strong --n-printers 15 --finalists B0 B1:0.35 B1:0.5 B2:0.001 B1* --b1star '{"C1":1.0,"C2":0.35}' 
 """
 import argparse, csv, json, os, sys, time
@@ -27,8 +28,8 @@ FINALISTS = [("B0", 0.0, None), ("B1", 0.5, None), ("B2", 1e-3, None), ("B3+", 0
 
 
 def job(a):
-    name, param, b3m, n_pr, seed, scenario, b1star = a
-    cl, ov = scenario_classes(scenario)
+    name, param, b3m, n_pr, seed, scenario, b1star, ttf = a
+    cl, ov = scenario_classes(scenario, ttf=ttf)
     T = class_T_star_seconds(cl)
     if name == "B1*":
         mult = b1star or B1STAR[n_pr]
@@ -41,7 +42,7 @@ def job(a):
     t0 = time.time()
     m = run_v3(seed, pol, horizon_h=WARMUP_H + WINDOW_H, warmup_h=WARMUP_H, classes=cl, node_overrides=ov,
                crew=1, n_printers=n_pr)
-    m.update({"scenario": scenario, "policy": name, "param": param, "b3_m": b3m if b3m else "", "n_printers": n_pr, "seed": seed,
+    m.update({"scenario": scenario, "ttf": ttf, "policy": name, "param": param, "b3_m": b3m if b3m else "", "n_printers": n_pr, "seed": seed,
               "wall_s": round(time.time() - t0, 1)})
     return m
 
@@ -54,6 +55,10 @@ def main():
     ap.add_argument("--scenario", default="moderate")
     ap.add_argument("--finalists", nargs="+", default=None,
                     help="перелік політика:параметр, напр. B0:0 B1:0.35 B1:0.5 B2:0.001 B1* (за замовчуванням — набір помірного сценарію)")
+    ap.add_argument("--ttf", default="weibull", choices=["weibull", "lognormal"],
+                    help="«справжній» розподіл часу до відмови зносових складових (Р49); правила — за моделлю Weibull")
+    ap.add_argument("--seeds-range", nargs=2, type=int, default=None, metavar=("FROM", "TO"),
+                    help="seed від FROM до TO−1 (замість --seeds), напр. 100005 100020 (Р48)")
     ap.add_argument("--b1star", default=None, help='JSON множників B1* для цього сценарію, напр. {"C1": 1.0, "C2": 0.35}')
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -68,7 +73,8 @@ def main():
             else:
                 fins.append((nm, float(pr) if pr else None, None))
     b1s = json.loads(a.b1star) if a.b1star else None
-    jobs = [(n, p, b, npr, s, a.scenario, b1s) for npr in a.n_printers for (n, p, b) in fins for s in a.seeds]
+    seeds = list(range(*a.seeds_range)) if a.seeds_range else a.seeds
+    jobs = [(n, p, b, npr, s, a.scenario, b1s, a.ttf) for npr in a.n_printers for (n, p, b) in fins for s in seeds]
     writer, done = None, 0
     with open(a.out, "w", newline="") as f, Pool(a.workers) as pool:
         for m in pool.imap_unordered(job, jobs):

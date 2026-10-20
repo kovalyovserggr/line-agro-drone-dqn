@@ -101,5 +101,32 @@ for T in (300.0, 800.0, None):
     report(abs(rate - 1 / ETA_R) < 3 * se,
            f"T={T}: випадкових відмов на од. напрацювання {rate*1e4:.3f}e-4 (теорія {1e4/ETA_R:.3f}e-4 ± {3*se*1e4:.3f}e-4)")
 
+print("(e) Р49: логнормальна «правда» з тими самими середнім і CV")
+from scipy import stats as _st
+for beta in (1.2, 1.5, 1.8, 2.0):
+    m = FailureMode("w", beta, ETA, ttf="lognormal")
+    rng = np.random.default_rng(11)
+    x = np.array([m.sample_failure_age(0.0, rng) for _ in range(40000)])
+    g1, g2 = math.gamma(1 + 1 / beta), math.gamma(1 + 2 / beta)
+    mean_w, cv_w = ETA * g1, math.sqrt(g2 / g1 ** 2 - 1)
+    se = x.std() / math.sqrt(len(x))
+    ks = _st.kstest(x, _st.lognorm(s=m.ln_sigma, scale=math.exp(m.ln_mu)).cdf).pvalue
+    report(abs(x.mean() - mean_w) < 3.5 * se and abs(x.std() / x.mean() - cv_w) < 0.03 and ks > 0.01,
+           f"β={beta}: середнє {x.mean():.1f} (Weibull {mean_w:.1f} ± {3.5*se:.1f}), CV {x.std()/x.mean():.3f} (Weibull {cv_w:.3f}), KS p={ks:.2f}")
+    # умовний семпл від віку v: розподіл залишкового часу = усічений логнормальний
+    v0 = 0.8 * mean_w
+    xc = np.array([m.sample_failure_age(v0, rng) for _ in range(20000)])
+    d = _st.lognorm(s=m.ln_sigma, scale=math.exp(m.ln_mu))
+    ks_c = _st.kstest(xc, lambda t: (d.cdf(t) - d.cdf(v0)) / d.sf(v0)).pvalue
+    report(xc.min() >= v0 and ks_c > 0.01, f"β={beta}: умовний семпл від v={v0:.0f}: min {xc.min():.1f} ≥ v, KS p={ks_c:.2f}")
+# CRN: однакова кількість випадкових чисел; Weibull за замовчуванням — побайтово як раніше
+r1, r2 = np.random.default_rng(5), np.random.default_rng(5)
+FailureMode("w", 1.5, ETA, ttf="lognormal").sample_failure_age(100.0, r1)
+FailureMode("w", 1.5, ETA).sample_failure_age(100.0, r2)
+report(r1.random() == r2.random(), "CRN: логнормальний семпл споживає стільки ж випадкових чисел, скільки вейбулівський")
+mw = FailureMode("w", 1.5, ETA); rr = np.random.default_rng(9)
+e = np.random.default_rng(9).exponential(1.0)
+report(mw.sample_failure_age(50.0, rr) == ETA * ((50.0 / ETA) ** 1.5 + e) ** (1 / 1.5), "Weibull за замовчуванням — формула не змінилась")
+
 print("ВСІ ПЕРЕВІРКИ ПРОЙДЕНО" if ok_all else "Є ПОМИЛКИ")
 sys.exit(0 if ok_all else 1)

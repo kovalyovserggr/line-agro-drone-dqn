@@ -84,7 +84,7 @@ def class_config(node_id: float, classes: dict | None = None, overrides: dict | 
     c.update(overrides.get(int(node_id), {}))
     return {
         "cls": node_class(node_id),
-        "modes": [(n, b, eta * H, qp, qc) for (n, b, eta, qp, qc) in c["modes"]],
+        "modes": [(m[0], m[1], m[2] * H, *m[3:]) for m in c["modes"]],
         "pm_mean": c["pm_h"][0] * H, "pm_cv": c["pm_h"][1],
         "cm_mean": c["cm_h"][0] * H, "cm_cv": c["cm_h"][1],
         "p0": c["quality"]["p0"], "pmax": c["quality"]["pmax"],
@@ -101,8 +101,10 @@ DEGRADATION_SCENARIOS = {"weak": 0.5, "moderate": 1.0, "strong": 2.0}
 
 
 def scenario_classes(name: str = "moderate", classes: dict | None = None,
-                     overrides: dict | None = None):
-    """Повертає (classes, node_overrides) для сценарію деградації."""
+                     overrides: dict | None = None, ttf: str = "weibull"):
+    """Повертає (classes, node_overrides) для сценарію деградації.
+    ttf = "lognormal" — зносові складові (β > 1, q_pm < 1) отримують логнормальний
+    «справжній» розподіл порогів відмов з тими самими середнім і CV (Р49)."""
     import copy
     s = DEGRADATION_SCENARIOS[name]
     cl = copy.deepcopy(classes or CLASSES)
@@ -110,6 +112,8 @@ def scenario_classes(name: str = "moderate", classes: dict | None = None,
         q = c["quality"]
         c["quality"] = {"p0": q["p0"], "pmax": min(0.5, q["p0"] + s * (q["pmax"] - q["p0"]))}
         c["speed_kappa"] = s * c["speed_kappa"]
+        if ttf != "weibull":
+            c["modes"] = [tuple(m[:5]) + ((ttf,) if (m[1] > 1.0 and m[3] < 1.0) else ()) for m in c["modes"]]
     ov = copy.deepcopy(overrides if overrides is not None else NODE_OVERRIDES)
     for v in ov.values():
         if "quality" in v:

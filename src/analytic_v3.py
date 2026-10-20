@@ -30,7 +30,7 @@ def class_T_star_seconds(classes):
         wear = [m for m in cfg["modes"] if m[3] < 1.0]
         if not wear:
             continue
-        _, b, eta_h, _, _ = wear[0]
+        _, b, eta_h = wear[0][:3]      # T* — за вейбулівською моделлю (Р49: і для логнормальної «правди»)
         T = age_replacement_T_star(b, eta_h, cfg["pm_h"][0], cfg["cm_h"][0])
         if T is not None:
             out[c] = T * H
