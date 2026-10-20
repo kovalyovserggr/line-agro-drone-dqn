@@ -9,7 +9,8 @@
 | Fig. 2 | Структура лінії з класами вузлів | — (схема) | — | — | заплановано |
 | Fig. 3 | h(t) за класами, ефект ТО за Kijima | TBD | — | — | заплановано |
 | Fig. 4 | Криві навчання DQN-TA, 3 агенти, 4 сценарії (fig_learning) | experiments/article3/make_figures.py | a3-dqn-ta-map-L | a3-v0.19-tamap | чернетка |
-| Fig. 5 | Карта сценаріїв: прибуток і різниця до B1* за кількістю принтерів (fig_scenario_map) | experiments/article3/make_figures.py | a3-test-finalists-L, a3-dqn-ta-map-L, a3-dqn-grid-* | a3-v0.19-tamap | чернетка |
+| Fig. 5 | Карта сценаріїв: прибуток і різниця до B1* за кількістю принтерів, з агентом, вибраним за валідацією (fig_scenario_map) | experiments/article3/make_figures.py | a3-test-finalists-L, a3-dqn-ta-map-L, a3-dqn-grid-*, a3-val-agents-L | a3-v0.23-table4 | чернетка |
+| Fig. 5b | Вісь деградації (15 принтерів): цінність ТО і різниця до B1* (fig_degradation) | experiments/article3/make_figures.py | a3-test-finalists-sw-L, a3-test-b1star-sw-L, a3-dqn-ta-sw-L, a3-val-agents-L | a3-v0.23-table4 | чернетка |
 | Fig. 5a | Абляція винагороди: OEE екструзії і друку за 17 принтерів (fig_ablation17) | experiments/article3/make_figures.py | a3-test-finalists-L, a3-dqn-grid-np12-np17-L, a3-dqn-ta-map-L | a3-v0.19-tamap | чернетка |
 | Fig. 6 | Теплова карта чутливості (β × d_pm/d_cm) | TBD | TBD | TBD | заплановано |
 | Fig. 7 | Вік у момент ТО проти аналітичного оптимуму | TBD | TBD | TBD | заплановано |
@@ -17,7 +18,7 @@
 | Table 1 | Класи обладнання і параметри з джерелами | — | — | — | заплановано |
 | Table 2 | Специфікація SMDP | — | — | — | заплановано |
 | Table 3 | Гіперпараметри | — | — | — | заплановано |
-| Table 4 | Основні результати зі статистикою | TBD | TBD | TBD | заплановано |
+| Table 4 | Основні результати: 6 сценаріїв × B0/B1/B2/B3+/B1*/DQN-TA (середнє 3; вибраний за валідацією), парні Δ до B1* ± SE (table4.csv, table4.md, table4_agent_selection.csv) | experiments/article3/make_table4.py | a3-test-finalists-L, a3-test-finalists-sw-L, a3-test-b1star-sw-L, a3-dqn-ta-map-L, a3-dqn-ta-sw-L, a3-val-agents-L | a3-v0.23-table4 | чернетка |
 | Table 5 | Узагальнення на відкладених наборах параметрів | TBD | TBD | TBD | заплановано |
 
 Рисунки: `docs/article3/figures/` (PNG 300 dpi + PDF). Палітра — категоріальна, перевірена валідатором
