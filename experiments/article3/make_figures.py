@@ -6,6 +6,8 @@
   fig_degradation   — вісь деградації (слабка / помірна / сильна, 15 принтерів): (a) цінність
                       ТО понад B0, %; (b) Δ до B1*: DQN-TA (середнє 3 і вибраний за валідацією, Р47),
                       B1 (m*), B2.
+  fig_robust        — Р49: Δ до B1* для заморожених політик при вейбулівській і логнормальній
+                      «правді» (з таблиць make_table4.py; запускати після нього).
   fig_learning      — криві навчання DQN-TA (прибуток за 26-тижневий навчальний
                       епізод), 3 агенти, малі мультиплікатори за n_printers.
   fig_ablation17    — OEE екструзії (C1) і друку (C2) за 17 принтерів: B1*, DQN-локальна,
@@ -39,9 +41,30 @@ plt.rcParams.update({
 })
 
 
+T20 = {"test_finalists_L.csv": "test20_finalists_L.csv", "test_finalists_strong_L.csv": "test20_finalists_strong_L.csv",
+       "test_finalists_weak_L.csv": "test20_finalists_weak_L.csv"}
+
+
+def load_fin(raw, f):
+    """Тестові фіналісти: seed 100000–100004 + дооцінка 100005–100019 (Р48), якщо є."""
+    d = [pd.read_csv(os.path.join(raw, f))]
+    if f in T20 and os.path.exists(os.path.join(raw, T20[f])):
+        d.append(pd.read_csv(os.path.join(raw, T20[f])))
+    return pd.concat(d, ignore_index=True)
+
+
 def load_dqn(raw, prefix):
-    return pd.concat([pd.read_csv(os.path.join(raw, f"{prefix}_s{i}", "eval.csv")).assign(agent=i)
-                      for i in (1, 2, 3)])
+    """eval.csv агентів (seed 100000–100004) + рядки test20_dqn_L.csv (Р48), якщо є для цього каталогу.
+    Абляція з локальною винагородою (dqn_g_*) дооцінки не має — лише 5 seed."""
+    t20 = os.path.join(raw, "test20_dqn_L.csv")
+    extra = pd.read_csv(t20) if os.path.exists(t20) else None
+    out = []
+    for i in (1, 2, 3):
+        d = pd.read_csv(os.path.join(raw, f"{prefix}_s{i}", "eval.csv"))
+        if extra is not None:
+            d = pd.concat([d, extra[extra.agent_dir == f"{prefix}_s{i}"]], ignore_index=True)
+        out.append(d.assign(agent=i))
+    return pd.concat(out, ignore_index=True)
 
 
 def selected_agent(raw, prefix):
@@ -51,12 +74,12 @@ def selected_agent(raw, prefix):
 
 
 def paired(m_by_seed, ref_by_seed):
-    d = (m_by_seed - ref_by_seed) / 1e3
+    d = ((m_by_seed - ref_by_seed) / 1e3).dropna()     # лише спільні seed
     return d.mean(), d.std(ddof=1) / np.sqrt(len(d))
 
 
 def fig_scenario_map(raw, out):
-    fin = pd.read_csv(os.path.join(raw, "test_finalists_L.csv"))
+    fin = load_fin(raw, "test_finalists_L.csv")
     rows = []
     for n in NS:
         fn = fin[fin.n_printers == n]
@@ -72,7 +95,8 @@ def fig_scenario_map(raw, out):
         r["dB2"], r["seB2"] = paired(fn[fn.policy == "B2"].set_index("seed").profit, ref)
         if n in LOCAL_DIRS:
             loc = load_dqn(raw, LOCAL_DIRS[n]).groupby("seed").profit.mean()
-            r["dLOC"], r["seLOC"] = paired(loc, ref)
+            r["dLOC"], r["seLOC"] = paired(loc, ref)      # лише 5 спільних seed (100000–100004)
+            r["nLOC"] = int(loc.index.isin(ref.index).sum())
         rows.append(r)
     t = pd.DataFrame(rows)
     t.round(3).to_csv(os.path.join(out, "fig_scenario_map_data.csv"), index=False)
@@ -96,7 +120,7 @@ def fig_scenario_map(raw, out):
     b.text(13.4, 1.5, "B1* = 0", ha="center", va="bottom", fontsize=7.5, color=INK2)
     for key, c, mk, lab in [("TA", C_TA, "o", "DQN-TA, mean of 3 agents"),
                             ("SEL", C_TA, "s", "DQN-TA, agent selected on validation seeds"),
-                            ("LOC", C_LOC, "^", "DQN, local reward (ablation)"),
+                            ("LOC", C_LOC, "^", "DQN, local reward (ablation; 5 seeds)"),
                             ("B1", C_REF, "D", "B1 (single period multiplier)")]:
         s = t.dropna(subset=[f"d{key}"])
         hollow = key == "SEL"
@@ -130,7 +154,7 @@ def fig_degradation(raw, out):
     (b) Δ до B1* (± SE): DQN-TA середнє 3 агентів, вибраний за валідацією агент, B1 (m*), B2."""
     rows = []
     for sc, lab, ff, fb, pre, m_star in DEGR:
-        fin = pd.read_csv(os.path.join(raw, ff))
+        fin = load_fin(raw, ff)
         fin = fin[fin.n_printers == 15]
         if fb:
             fin = pd.concat([fin, pd.read_csv(os.path.join(raw, fb))])
@@ -190,6 +214,39 @@ def fig_degradation(raw, out):
     return t
 
 
+def fig_robust(table_dir, out):
+    """Р49: Δ до B1* при вейбулівській і логнормальній «правді» (політики заморожені), ± SE, 20 seed.
+    Дані — docs/article3/tables/table4.csv і table_robust_lognormal.csv (make_table4.py)."""
+    t4 = pd.read_csv(os.path.join(table_dir, "table4.csv"))
+    rb = pd.read_csv(os.path.join(table_dir, "table_robust_lognormal.csv"))
+    sc = [("moderate", 15, "Moderate,\n15 printers"), ("moderate", 17, "Moderate,\n17 printers"), ("strong", 15, "Strong,\n15 printers")]
+    pols = [("DQN-TA (val.-selected)", "DQN-TA (val.-selected)", C_TA, "s", True),
+            ("DQN-TA (mean of 3)", "DQN-TA (mean of 3)", C_TA, "o", False),
+            ("B1", "B1 (m* Weibull = m* lognormal)", C_REF, "D", False)]
+    fig, ax = plt.subplots(figsize=(5.6, 3.2))
+    ax.axhline(0, color=INK2, lw=1)
+    x = np.arange(len(sc))
+    for j, (pw, pl, c, mk, hollow) in enumerate(pols):
+        for k, (src, key, ls, alpha) in enumerate([(t4, pw, "Weibull", 0.45), (rb, pl, "lognormal", 1.0)]):
+            ys, es = [], []
+            for s_, n, _ in sc:
+                r = src[(src.scenario == s_) & (src.n_printers == n) & (src.policy == key)].iloc[0]
+                ys.append(r.d_vs_B1star_k); es.append(r.se_k)
+            xo = x + (j - 1) * 0.25 + (k - 0.5) * 0.1
+            ax.errorbar(xo, ys, yerr=es, color=c, alpha=alpha, marker=mk, ms=6, lw=0, elinewidth=1.5,
+                        mec=c if hollow else "white", mfc="white" if hollow else c, mew=1.5 if hollow else 1,
+                        label=f"{pw.replace(' (val.-selected)', ', selected agent').replace(' (mean of 3)', ', mean of 3')} — {ls} truth")
+    ax.set_xticks(x); ax.set_xticklabels([l for *_, l in sc])
+    ax.set_ylabel("Δ profit vs B1*, k USD / year")
+    ax.set_title("Frozen policies under a misspecified failure model (± SE, 20 seeds)", loc="left")
+    ax.grid(axis="x", visible=False)
+    ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=7.5)
+    fig.tight_layout()
+    for ext in ("png", "pdf"):
+        fig.savefig(os.path.join(out, f"fig_robust.{ext}"))
+    plt.close(fig)
+
+
 def fig_learning(raw, out):
     fig, axs = plt.subplots(2, 2, figsize=(7.2, 4.4), sharex=True)
     for ax, n in zip(axs.flat, NS):
@@ -214,7 +271,7 @@ def fig_learning(raw, out):
 
 
 def fig_ablation17(raw, out):
-    fin = pd.read_csv(os.path.join(raw, "test_finalists_L.csv"))
+    fin = load_fin(raw, "test_finalists_L.csv")
     fn = fin[fin.n_printers == 17]
     sets = [("B1*", fn[fn.policy == "B1*"], C_B1, "D"),
             ("DQN, local reward", load_dqn(raw, "dqn_g_np17"), C_LOC, "^"),
@@ -246,6 +303,9 @@ def main():
     t = fig_scenario_map(a.raw, a.out)
     print(t.round(1).to_string(index=False))
     print(fig_degradation(a.raw, a.out).round(1).to_string(index=False))
+    tdir = os.path.join(os.path.dirname(os.path.normpath(a.out)), "tables")
+    if os.path.exists(os.path.join(tdir, "table_robust_lognormal.csv")):
+        fig_robust(tdir, a.out)
     fig_learning(a.raw, a.out)
     fig_ablation17(a.raw, a.out)
     print("рисунки збережено в", a.out)
