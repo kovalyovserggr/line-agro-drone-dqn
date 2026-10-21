@@ -50,6 +50,27 @@ def paired(a, ref):
     return d.mean(), d.std(ddof=1) / np.sqrt(len(d)), len(d)
 
 
+def wilcoxon_p(a, ref):
+    """Двобічний знаковий ранговий тест Вілкоксона для парних різниць (CRN)."""
+    from scipy.stats import wilcoxon
+    d = (a - ref).dropna()
+    if len(d) == 0 or np.allclose(d, 0):
+        return np.nan
+    return float(wilcoxon(d, zero_method="wilcox").pvalue)
+
+
+def holm(ps):
+    """Поправка Холма–Бонферроні; NaN пропускаються."""
+    ps = np.asarray(ps, dtype=float)
+    out = np.full_like(ps, np.nan)
+    idx = [i for i in np.argsort(ps) if not np.isnan(ps[i])]
+    m, run = len(idx), 0.0
+    for k, i in enumerate(idx):
+        run = max(run, min(1.0, (m - k) * ps[i]))
+        out[i] = run
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw", default="experiments/article3/raw")
@@ -88,9 +109,14 @@ def main():
             par = df.param.iloc[0] if "param" in df and name.startswith("B") else (f"agent {best}" if "selected" in name else "")
             rows.append({"scenario": sc, "n_printers": n, "policy": name, "param": par,
                          "profit_k": s.mean() / 1e3, "d_vs_B1star_k": d, "se_k": se, "n_seeds": k,
+                         "p_wilcoxon": wilcoxon_p(s, ref) if name != "B1*" else np.nan,
                          "throughput": df.throughput_per_week.mean(), "OEE": df.OEE.mean(),
                          "pm": df.pm.mean(), "failures": df.failures.mean()})
     t = pd.DataFrame(rows)
+    # Холм — окремо для кожної політики по 6 сценаріях (сімейство порівнянь «політика vs B1*»)
+    t["p_holm"] = np.nan
+    for pol_name, g in t.groupby("policy"):
+        t.loc[g.index, "p_holm"] = holm(g.p_wilcoxon.values)
     sel = pd.DataFrame(sel_rows)
     t.round(3).to_csv(os.path.join(a.out, "table4.csv"), index=False)
     sel.round(3).to_csv(os.path.join(a.out, "table4_agent_selection.csv"), index=False)
@@ -108,10 +134,12 @@ def main():
             if r.empty:
                 cells.append("—"); continue
             r = r.iloc[0]
-            cells.append(f"{r.profit_k:.1f}" if p == "B1*" else f"{r.profit_k:.1f} ({r.d_vs_B1star_k:+.1f} ± {r.se_k:.1f})")
+            star = "" if p == "B1*" or np.isnan(r.p_holm) else ("**" if r.p_holm < 0.01 else ("*" if r.p_holm < 0.05 else ""))
+            cells.append(f"{r.profit_k:.1f}" if p == "B1*" else f"{r.profit_k:.1f} ({r.d_vs_B1star_k:+.1f} ± {r.se_k:.1f}){star}")
         md.append(f"| {lab[(sc, n)]} | " + " | ".join(cells) + " |")
     with open(os.path.join(a.out, "table4.md"), "w", encoding="utf-8") as f:
-        f.write("Profit, k USD/year, test seeds 100000–100019 (n = 20); in brackets — paired Δ vs B1* ± SE.\n\n")
+        f.write("Profit, k USD/year, test seeds 100000–100019 (n = 20); in brackets — paired Δ vs B1* ± SE. "
+                "* / ** — Wilcoxon signed-rank vs B1*, Holm-adjusted over the six scenarios per policy, p < 0.05 / p < 0.01.\n\n")
         f.write("\n".join(md) + "\n")
     print("\n".join(md))
     print()

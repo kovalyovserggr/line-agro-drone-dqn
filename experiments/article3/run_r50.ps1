@@ -4,6 +4,7 @@
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $env:PYTHONPATH = "src"
+$env:PYTHONUTF8 = "1"          # UTF-8 для виводу Python, перенаправленого у файли (Windows)
 $raw = "experiments/article3/raw"
 
 # 1. η_C2 ∈ {750; 3000} (база 1500): повне переналаштування бейслайнів і перенавчання DQN-TA, помірна, 15 принтерів

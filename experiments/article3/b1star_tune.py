@@ -48,18 +48,37 @@ def main():
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--horizon-scale", type=float, default=1.0, help="лише для димового тесту (<1)")
     ap.add_argument("--n-printers", nargs="+", type=int, default=[15])
+    ap.add_argument("--resume", action="store_true",
+                    help="дочитати вже пораховані конфігурації з --out (повні за seed) і дописувати нові рядки")
     ap.add_argument("--summary", default=None, help="JSON з підсумковими множниками B1* (Р50: для конвеєра)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     summary = {}
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
-    f = open(a.out, "w", newline="")
+    prev = {}                                        # (n_printers, ключ конфігурації) -> [прибутки]
     writer = None
+    if a.resume and os.path.exists(a.out) and os.path.getsize(a.out) > 0:
+        with open(a.out, newline="") as fr:
+            rows = list(csv.DictReader(fr))
+        for r in rows:
+            if r["scenario"] == a.scenario and int(r["seed"]) in a.seeds:
+                prev.setdefault((int(r["n_printers"]), r["mults"]), {})[int(r["seed"])] = float(r["profit"])
+        complete = {k for k, v in prev.items() if len(v) == len(a.seeds)}
+        with open(a.out, "w", newline="") as fw:   # лишаємо лише повні конфігурації
+            keep = [r for r in rows if (int(r["n_printers"]), r["mults"]) in complete]
+            if rows:
+                w0 = csv.DictWriter(fw, fieldnames=list(rows[0].keys())); w0.writeheader(); w0.writerows(keep)
+        prev = {k: list(v.values()) for k, v in prev.items() if k in complete}
+        print(f"дозапуск: {len(prev)} повних конфігурацій з {a.out}", flush=True)
+        f = open(a.out, "a", newline="")
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys())) if rows else None
+    else:
+        f = open(a.out, "w", newline="")
     pool = Pool(a.workers)
     for n_pr in a.n_printers:
         cur = {c: a.start for c in a.order}
-        cache = {}                    # ключ конфігурації -> середній прибуток
+        cache = {k[1]: sum(v) / len(v) for k, v in prev.items() if k[0] == n_pr}   # ключ конфігурації -> середній прибуток
         print(f"=== n_printers = {n_pr}", flush=True)
         for cls in a.order:
             cands = []
