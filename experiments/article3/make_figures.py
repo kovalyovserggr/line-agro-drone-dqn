@@ -55,9 +55,10 @@ def load_fin(raw, f):
 
 def load_dqn(raw, prefix):
     """eval.csv агентів (seed 100000–100004) + рядки test20_dqn_L.csv (Р48), якщо є для цього каталогу.
-    Абляція з локальною винагородою (dqn_g_*) дооцінки не має — лише 5 seed."""
-    t20 = os.path.join(raw, "test20_dqn_L.csv")
-    extra = pd.read_csv(t20) if os.path.exists(t20) else None
+    Абляція з локальною винагородою (dqn_g_*) — з test20_ablation_L.csv (Р50), якщо є; інакше 5 seed."""
+    ex = [pd.read_csv(os.path.join(raw, f)) for f in ("test20_dqn_L.csv", "test20_ablation_L.csv")
+          if os.path.exists(os.path.join(raw, f))]                     # Р48; абляція — Р50
+    extra = pd.concat(ex, ignore_index=True) if ex else None
     out = []
     for i in (1, 2, 3):
         d = pd.read_csv(os.path.join(raw, f"{prefix}_s{i}", "eval.csv"))
@@ -120,7 +121,7 @@ def fig_scenario_map(raw, out):
     b.text(13.4, 1.5, "B1* = 0", ha="center", va="bottom", fontsize=7.5, color=INK2)
     for key, c, mk, lab in [("TA", C_TA, "o", "DQN-TA, mean of 3 agents"),
                             ("SEL", C_TA, "s", "DQN-TA, agent selected on validation seeds"),
-                            ("LOC", C_LOC, "^", "DQN, local reward (ablation; 5 seeds)"),
+                            ("LOC", C_LOC, "^", "DQN, local reward (ablation" + ("; 5 seeds)" if t["nLOC"].max() < 20 else ")")),
                             ("B1", C_REF, "D", "B1 (single period multiplier)")]:
         s = t.dropna(subset=[f"d{key}"])
         hollow = key == "SEL"

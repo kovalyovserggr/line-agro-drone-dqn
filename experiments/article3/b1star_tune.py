@@ -48,8 +48,10 @@ def main():
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--horizon-scale", type=float, default=1.0, help="лише для димового тесту (<1)")
     ap.add_argument("--n-printers", nargs="+", type=int, default=[15])
+    ap.add_argument("--summary", default=None, help="JSON з підсумковими множниками B1* (Р50: для конвеєра)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
+    summary = {}
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     f = open(a.out, "w", newline="")
@@ -81,8 +83,12 @@ def main():
                   + f"  | обрано {cls}={best[cls]} (прибуток {best_val/1e3:.1f} тис./рік)", flush=True)
             cur = best
         print(f"B1* підсумок (n_printers = {n_pr}):", json.dumps(cur, sort_keys=True), flush=True)
+        summary[n_pr] = {"mults": cur, "profit_k": max(cache.values()) / 1e3}
     pool.close()
     f.close()
+    if a.summary:
+        with open(a.summary, "w") as fs:
+            json.dump(summary, fs, indent=1)
 
 
 if __name__ == "__main__":

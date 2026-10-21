@@ -104,10 +104,23 @@ def scenario_classes(name: str = "moderate", classes: dict | None = None,
                      overrides: dict | None = None, ttf: str = "weibull"):
     """Повертає (classes, node_overrides) для сценарію деградації.
     ttf = "lognormal" — зносові складові (β > 1, q_pm < 1) отримують логнормальний
-    «справжній» розподіл порогів відмов з тими самими середнім і CV (Р49)."""
-    import copy
-    s = DEGRADATION_SCENARIOS[name]
+    «справжній» розподіл порогів відмов з тими самими середнім і CV (Р49).
+    name може містити модифікатори η: "moderate+C2eta750" (Р50)."""
+    import copy, re
+    # Р50: модифікатори параметрів у назві сценарію: "moderate+C2eta750+C4eta2500" —
+    # η зносової складової класу (год). Назва з модифікаторами потрапляє в усі CSV і config.json.
+    base, *mods = name.split("+")
+    s = DEGRADATION_SCENARIOS[base]
     cl = copy.deepcopy(classes or CLASSES)
+    for mod in mods:
+        mm = re.fullmatch(r"(C\d)eta(\d+(?:\.\d+)?)", mod)
+        if not mm or mm.group(1) not in cl:
+            raise ValueError(f"невідомий модифікатор сценарію: {mod}")
+        c, eta = mm.group(1), float(mm.group(2))
+        wear = [k for k, m in enumerate(cl[c]["modes"]) if m[3] < 1.0]
+        assert len(wear) == 1, f"{c}: очікується одна зносова складова"
+        m = list(cl[c]["modes"][wear[0]]); m[2] = eta
+        cl[c]["modes"][wear[0]] = tuple(m)
     for c in cl.values():
         q = c["quality"]
         c["quality"] = {"p0": q["p0"], "pmax": min(0.5, q["p0"] + s * (q["pmax"] - q["p0"]))}

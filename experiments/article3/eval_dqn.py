@@ -21,7 +21,7 @@ WARMUP_H, WINDOW_H = 26 * 7 * 24, 8760
 
 
 def job(a):
-    d, seed, ttf = a
+    d, seed, ttf, scen = a
     import torch
     torch.set_num_threads(1)
     from LineV3 import run_v3, DT
@@ -29,15 +29,16 @@ def job(a):
     from DQNAgentV3 import DoubleDQNAgentV3
     from DQNLineV3 import DQNPMPolicy, OBS_DIM
     cfg = json.load(open(os.path.join(d, "config.json")))
-    cl, ov = scenario_classes(cfg["scenario"], ttf=ttf)
-    agent = DoubleDQNAgentV3(OBS_DIM, 2, seed=cfg["agent_seed"], lr=cfg["lr"], lr_end=cfg["lr_end"],
-                             eps_steps=10**9, total_steps=10**9, buffer=1000, warmup=cfg["warmup"])
+    scenario = scen or cfg["scenario"]           # Р50: заморожений агент в іншому середовищі
+    cl, ov = scenario_classes(scenario, ttf=ttf)
+    agent = DoubleDQNAgentV3(OBS_DIM, 2, seed=cfg["agent_seed"], lr=cfg.get("lr", 3e-4), lr_end=cfg.get("lr_end", 3e-5),
+                             eps_steps=10**9, total_steps=10**9, buffer=1000, warmup=cfg.get("warmup", 1000))
     agent.online.load_state_dict(torch.load(os.path.join(d, "model.pt")))
-    pol = DQNPMPolicy(agent, train=False, grid=cfg["grid"])
+    pol = DQNPMPolicy(agent, train=False, grid=cfg.get("grid", 0.0))
     t0 = time.time()
     m = run_v3(seed, pol, horizon_h=WARMUP_H + WINDOW_H, warmup_h=WARMUP_H, classes=cl, node_overrides=ov,
                crew=1, n_printers=cfg["n_printers"], dt=cfg.get("dt", DT))
-    m.update({"scenario": cfg["scenario"], "policy": "DQN", "param": cfg["agent_seed"], "seed": seed,
+    m.update({"scenario": scenario, "trained_on": cfg["scenario"], "policy": "DQN", "param": cfg["agent_seed"], "seed": seed,
               "n_printers": cfg["n_printers"], "ttf": ttf, "agent_dir": os.path.basename(os.path.normpath(d)),
               "wall_s": round(time.time() - t0, 1)})
     return m
@@ -50,13 +51,15 @@ def main():
     ap.add_argument("--seeds-range", nargs=2, type=int, default=None, metavar=("FROM", "TO"),
                     help="seed від FROM до TO−1 (замість --seeds)")
     ap.add_argument("--ttf", default="weibull", choices=["weibull", "lognormal"])
+    ap.add_argument("--scenario", default=None,
+                    help="середовище оцінювання замість сценарію навчання (Р50: заморожений агент, напр. moderate+C4eta2500)")
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     seeds = a.seeds if a.seeds else list(range(*a.seeds_range))
     for d in a.dirs:
         assert os.path.exists(os.path.join(d, "model.pt")), f"немає моделі в {d}"
-    jobs = [(d, s, a.ttf) for d in a.dirs for s in seeds]
+    jobs = [(d, s, a.ttf, a.scenario) for d in a.dirs for s in seeds]
     writer, done = None, 0
     with open(a.out, "w", newline="") as f, Pool(a.workers) as pool:
         for m in pool.imap_unordered(job, jobs):
