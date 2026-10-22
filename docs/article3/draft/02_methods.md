@@ -450,7 +450,8 @@ preserved. Scenarios: moderate degradation with 15 and 17 printers, and strong d
 **Unsourced parameters (Р50).**
 
 - For the printer wear scale η_C2 ∈ {750, 3 000} h (base 1 500 h), every policy is re-tuned or re-trained, with
-  the same selection rules fixed in advance.
+  the same selection rules fixed in advance. The B2 threshold grid is widened to θ ∈ {10⁻⁴, 3·10⁻⁴, 10⁻³,
+  3·10⁻³, 10⁻²}, because the per-operation failure risk, and hence the optimal θ, scales with η.
 - For the manual-station tooling scale η_C4 ∈ {2 500, 10 000} h (base 5 000 h), the base policies are frozen,
   since C4 does not receive PM within the horizon.
 

@@ -8,6 +8,8 @@
                       B1 (m*), B2.
   fig_robust        — Р49: Δ до B1* для заморожених політик при вейбулівській і логнормальній
                       «правді» (з таблиць make_table4.py; запускати після нього).
+  fig_sens          — Р50: Δ до B1* за η_C2 (переналаштування) і η_C4 (заморожені політики);
+                      з table_sens_eta.csv (make_sens.py; запускати після нього).
   fig_learning      — криві навчання DQN-TA (прибуток за 26-тижневий навчальний
                       епізод), 3 агенти, малі мультиплікатори за n_printers.
   fig_ablation17    — OEE екструзії (C1) і друку (C2) за 17 принтерів: B1*, DQN-локальна,
@@ -248,6 +250,45 @@ def fig_robust(table_dir, out):
     plt.close(fig)
 
 
+def fig_sens(table_dir, out):
+    """Р50: Δ до B1* за η_C2 (усе переналаштовано) і η_C4 (заморожені політики), ± SE, 20 seed.
+    Дані — docs/article3/tables/table_sens_eta.csv (make_sens.py)."""
+    t = pd.read_csv(os.path.join(table_dir, "table_sens_eta.csv"))
+    xv = {"750 h": 750, "base": None, "3000 h": 3000, "2500 h": 2500, "10000 h": 10000}
+    fig, axs = plt.subplots(1, 2, figsize=(7.2, 3.1), sharey=True)
+    for ax, study, base, title in [(axs[0], "eta_C2 (re-tuned)", 1500, "(a) Printer wear scale η_C2 (all policies re-tuned)"),
+                                   (axs[1], "eta_C4 (frozen)", 5000, "(b) Tooling wear scale η_C4 (policies frozen)")]:
+        d = t[t.study == study].copy()
+        d["x"] = d.variant.map(lambda v: base if v == "base" else xv[v])
+        ax.axhline(0, color=INK2, lw=1)
+        for k, (pol, c, mk, hollow, lab) in enumerate([
+                ("DQN-TA (val.-selected)", C_TA, "s", True, "DQN-TA, selected agent"),
+                ("DQN-TA (mean of 3)", C_TA, "o", False, "DQN-TA, mean of 3 agents"),
+                ("B1", C_REF, "D", False, "B1 (single multiplier)")]):
+            g = d[d.policy == pol].sort_values("x")
+            ax.errorbar(g.x * (1 + (k - 1) * 0.06), g.d_vs_B1star_k, yerr=g.se_k, color=c, marker=mk, ms=6, lw=1 if not hollow else 0,
+                        alpha=0.9, elinewidth=1.5, mec=c if hollow else "white", mfc="white" if hollow else c,
+                        mew=1.5 if hollow else 1, label=lab)
+        ax.set_xscale("log")
+        xs = sorted(d.x.unique())
+        ax.set_xticks(xs); ax.set_xticklabels([f"{int(x):,}".replace(",", " ") + (" (base)" if x == base else "") for x in xs], fontsize=7.5)
+        ax.minorticks_off()
+        ax.set_xlabel("η, h of operation")
+        ax.set_title(title, loc="left", fontsize=8.5)
+        ax.grid(axis="x", visible=False)
+        b2 = d[(d.policy == "B2") & (d.variant != "base")]
+        if study.startswith("eta_C2"):
+            txt = "B2: " + "; ".join(f"{int(r.x)} h: {r.d_vs_B1star_k:.0f}" for _, r in d[d.policy == "B2"].sort_values("x").iterrows())
+            ax.text(0.02, 0.03, txt, transform=ax.transAxes, fontsize=7, color=INK2)
+    axs[0].set_ylabel("Δ profit vs B1*, k USD / year")
+    axs[0].set_ylim(-25, 35)
+    axs[0].legend(frameon=False, loc="upper right", fontsize=7.5)
+    fig.tight_layout()
+    for ext in ("png", "pdf"):
+        fig.savefig(os.path.join(out, f"fig_sens.{ext}"))
+    plt.close(fig)
+
+
 def fig_learning(raw, out):
     fig, axs = plt.subplots(2, 2, figsize=(7.2, 4.4), sharex=True)
     for ax, n in zip(axs.flat, NS):
@@ -307,6 +348,8 @@ def main():
     tdir = os.path.join(os.path.dirname(os.path.normpath(a.out)), "tables")
     if os.path.exists(os.path.join(tdir, "table_robust_lognormal.csv")):
         fig_robust(tdir, a.out)
+    if os.path.exists(os.path.join(tdir, "table_sens_eta.csv")):
+        fig_sens(tdir, a.out)
     fig_learning(a.raw, a.out)
     fig_ablation17(a.raw, a.out)
     print("рисунки збережено в", a.out)

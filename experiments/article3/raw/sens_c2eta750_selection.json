@@ -1,0 +1,18 @@
+{
+ "scenario": "moderate+C2eta750",
+ "n_printers": 15,
+ "m_star": 0.5,
+ "theta_star": 0.003,
+ "b1star": {
+  "C2": 0.5,
+  "C1": 0.75
+ },
+ "val_profit_k": {
+  "1": 6612.852772707862,
+  "2": 6607.58445386744,
+  "3": 6607.112631542393
+ },
+ "selected_agent": 1,
+ "smoke": false,
+ "fixed_at": "2026-10-21 19:43:39"
+}
