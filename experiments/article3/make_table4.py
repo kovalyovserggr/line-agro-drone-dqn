@@ -118,8 +118,8 @@ def main():
     for pol_name, g in t.groupby("policy"):
         t.loc[g.index, "p_holm"] = holm(g.p_wilcoxon.values)
     sel = pd.DataFrame(sel_rows)
-    t.round(3).to_csv(os.path.join(a.out, "table4.csv"), index=False)
-    sel.round(3).to_csv(os.path.join(a.out, "table4_agent_selection.csv"), index=False)
+    t.round(6).to_csv(os.path.join(a.out, "table4.csv"), index=False)
+    sel.round(6).to_csv(os.path.join(a.out, "table4_agent_selection.csv"), index=False)
 
     # Markdown-версія (англійською, як у статті)
     lab = {("moderate", 12): "Moderate, 12 pr.", ("moderate", 15): "Moderate, 15 pr.",
@@ -179,14 +179,15 @@ def robustness(raw, out, t4, sel):
                    (t4.policy == {"B1 (m* Weibull = m* lognormal)": "B1"}.get(name, name))]
             rows.append({"scenario": sc, "n_printers": n, "policy": name, "m_star_lognormal": m_logn,
                          "profit_k": s_.mean() / 1e3, "d_vs_B1star_k": d, "se_k": se,
+                         "p_wilcoxon": wilcoxon_p(s_, ref) if name != "B1*" else np.nan,
                          "weibull_d_vs_B1star_k": w.d_vs_B1star_k.iloc[0] if len(w) else np.nan,
                          "failures": df.failures.mean(), "pm": df.pm.mean()})
         for i in AGENTS:
             d, se, _ = paired(by_seed(ag[i]), ref)
             rows.append({"scenario": sc, "n_printers": n, "policy": f"DQN-TA agent {i}", "profit_k": by_seed(ag[i]).mean() / 1e3,
-                         "d_vs_B1star_k": d, "se_k": se, "failures": ag[i].failures.mean(), "pm": ag[i].pm.mean()})
+                         "d_vs_B1star_k": d, "se_k": se, "p_wilcoxon": wilcoxon_p(by_seed(ag[i]), ref), "failures": ag[i].failures.mean(), "pm": ag[i].pm.mean()})
     r = pd.DataFrame(rows)
-    r.round(3).to_csv(os.path.join(out, "table_robust_lognormal.csv"), index=False)
+    r.round(6).to_csv(os.path.join(out, "table_robust_lognormal.csv"), index=False)
     lab = {("moderate", 15): "Moderate, 15 pr.", ("moderate", 17): "Moderate, 17 pr.", ("strong", 15): "Strong, 15 pr."}
     order = ["B0", "B1 (m* Weibull = m* lognormal)", "B2", "B1*", "DQN-TA (mean of 3)", "DQN-TA (val.-selected)"]
     md = ["| Scenario | " + " | ".join(order) + " |", "|---" * (len(order) + 1) + "|"]

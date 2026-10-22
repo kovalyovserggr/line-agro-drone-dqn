@@ -24,6 +24,12 @@ def paired(a, ref):
     return d.mean(), d.std(ddof=1) / np.sqrt(len(d)), len(d)
 
 
+def wilcoxon_p(a, ref):
+    from scipy.stats import wilcoxon
+    d = (a - ref).dropna()
+    return np.nan if len(d) == 0 or np.allclose(d, 0) else float(wilcoxon(d).pvalue)
+
+
 def block(label, eta_lab, fin, dq, selected, extra):
     ref = by_seed(fin[fin.policy == "B1*"])
     ag = {int(i): g for i, g in dq.groupby("param")}
@@ -47,7 +53,7 @@ def block(label, eta_lab, fin, dq, selected, extra):
         elif "selected" in name:
             par = f"agent {selected}"
         rows.append({"study": label, "variant": eta_lab, "policy": name, "param": par, "profit_k": s.mean() / 1e3,
-                     "d_vs_B1star_k": d, "se_k": se, "pm": df.pm.mean(), "failures": df.failures.mean(), **extra})
+                     "d_vs_B1star_k": d, "se_k": se, "p_wilcoxon": wilcoxon_p(s, ref) if name != "B1*" else np.nan, "pm": df.pm.mean(), "failures": df.failures.mean(), **extra})
     return rows
 
 
@@ -82,7 +88,7 @@ def main():
         dq = pd.read_csv(os.path.join(a.raw, f"sens_{tag}_test_dqn_L.csv"))
         rows += block("eta_C4 (frozen)", lab, fin, dq, base_sel, {})
     t = pd.DataFrame(rows)
-    t.round(3).to_csv(os.path.join(a.out, "table_sens_eta.csv"), index=False)
+    t.round(6).to_csv(os.path.join(a.out, "table_sens_eta.csv"), index=False)
     order = ["B0", "B1", "B2", "B1*", "DQN-TA (mean of 3)", "DQN-TA (val.-selected)"]
     md = ["Sensitivity to unsourced wear parameters (moderate degradation, 15 printers). Profit, k USD/year, "
           "test seeds 100000–100019; in brackets — paired Δ vs B1* of the same variant ± SE. "

@@ -5,7 +5,8 @@
 | Файл | Розділ | Стан |
 |---|---|---|
 | 02_methods.md | 2. Materials and Methods | чернетка v0.1 (2026-10-21) |
-| 03_results.md | 3. Results | після заморожування результатів (Р50) |
+| 03_results.md | 3. Results | чернетка v0.1 (2026-10-22), результати заморожені на a3-v0.29-sens |
+| results_numbers.md | Аркуш чисел для Results | генерує experiments/article3/results_numbers.py |
 | 04_discussion.md | 4. Discussion | після Results |
 | 01_introduction.md | 1. Introduction (з оглядом літератури) | останнім, разом з анотацією |
 
