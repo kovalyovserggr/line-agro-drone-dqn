@@ -124,12 +124,14 @@ schedule PM while a node waits for inputs, when PM costs little throughput. The 
 <!-- pmwait_share_SEL_n -->. The tuned opportunistic rule B3+ gains nothing over periodic PM either
 (Section 3.3).
 
-Two factors explain this. First, nodes that need maintenance most — the bottleneck class — rarely wait.
-Second, the decision grid (Section 2.4.2) queries a node when its age crosses a grid cell. Age grows only
-during processing, so such crossings are detected at operation boundaries, not during waits. This makes
-decisions during waiting rare by construction.
-[AUTHOR: this is a limitation of the design that a reviewer will notice; we state it openly here and in the
-Discussion. A variant that re-queries waiting nodes is possible future work.]
+Two factors explain this. First, the nodes that need maintenance most — the bottleneck class — rarely wait.
+Second, under the decision grid (Section 2.4.2) a busy node is queried at an operation boundary, because its
+age grows only while it is processing. Decisions during waiting therefore arise only for nodes that are blocked or
+starved after an operation, which are mainly the non-bottleneck extruders.
+
+[TODO (Р51, a3-policy-events-L): the event-log analysis shows that the agent does use this opportunity for the
+extruders. In the pilot, all of its extruder PMs started while the extruder was blocked, but extruder PMs are
+few, hence the small overall share. Replace this paragraph with the official numbers.]
 
 **Maintenance effort is shifted towards the bottleneck.** The class-level OEE values point to a different
 mechanism. With 12 printers (printing is the bottleneck), compared with B1\*, the selected agent:

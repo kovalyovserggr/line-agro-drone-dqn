@@ -15,8 +15,8 @@
 | Fig. 5d | Чутливість до η_C2 (переналаштування) і η_C4 (заморожені політики): Δ до B1* (fig_sens) | experiments/article3/make_figures.py (після make_sens.py) | a3-sens-eta-L, a3-test20-L | a3-v0.29-sens | чернетка |
 | Fig. 5a | Абляція винагороди: OEE екструзії і друку за 17 принтерів (fig_ablation17) | experiments/article3/make_figures.py | a3-test-finalists-L, a3-dqn-grid-np12-np17-L, a3-dqn-ta-map-L | a3-v0.19-tamap | чернетка |
 | Fig. 6 | Теплова карта чутливості (β × d_pm/d_cm) | TBD | TBD | TBD | заплановано |
-| Fig. 7 | Вік у момент ТО проти аналітичного оптимуму | TBD | TBD | TBD | заплановано |
-| Fig. 8 | Фрагмент Ганта: DQN проти найкращого бейслайну | TBD | TBD | TBD | заплановано |
+| Fig. 7 | Вік зносової складової у момент ТО і відмови за класами, B1* проти DQN-TA, з T*/η (fig_pm_age) | experiments/article3/make_figures.py | a3-policy-events-L | a3-v0.31-events | пілот C; офіційно — L |
+| Fig. 8 | Часова діаграма ТО і відмов екструдерів і принтерів, 120 діб, B1* і DQN-TA на тому самому seed (fig_timeline; замість Ганта, див. Р51) | experiments/article3/make_figures.py | a3-policy-events-L | a3-v0.31-events | пілот C; офіційно — L |
 | Table 1 | Класи обладнання і параметри з джерелами | — | — | — | заплановано |
 | Table 2 | Специфікація SMDP | — | — | — | заплановано |
 | Table 3 | Гіперпараметри | — | — | — | заплановано |

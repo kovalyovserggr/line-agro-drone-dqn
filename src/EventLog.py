@@ -16,7 +16,12 @@
 
 Типи подій (поле "ev"):
     meta     — параметри прогону (seed, тег, політика, ...)
-    state    — зміна стану вузла: node, from, to
+    state    — зміна стану вузла: node, from, to; для вузлів v0.3 при вході в MAINTENANCE /
+               REPAIR додатково (Р51): r — нормований вік зносових складових (max v/η),
+               ages — v/η кожної складової, op_pm_h — напрацювання від останнього ТО, год,
+               pm_wait — лічильник ТО під час очікування (приріст = це ТО почато в E2/E3),
+               mode — індекс відмовлої складової (лише REPAIR). Вік скидається в кінці ТО
+               чи ремонту, тож на такті входу він ще дорівнює віку в момент втручання.
     failure  — відмова (перехід у REPAIR): node
     produce  — виготовлено одиниць ресурсу: node, type, qty
     defect   — приріст списаного в брак: node, res, qty  (облік D15/D18)
@@ -66,7 +71,16 @@ class EventLogger:
         for n in self.line.units:
             st0, prod0, def0 = self._prev[n.id]
             if n.status != st0:
-                self._write({"ev": "state", "t": t, "node": n.id, "from": st0.name, "to": n.status.name})
+                rec = {"ev": "state", "t": t, "node": n.id, "from": st0.name, "to": n.status.name}
+                if n.status in (NodeState.MAINTENANCE, NodeState.REPAIR) and hasattr(n, "rel"):
+                    # лише читання атрибутів — генератори не викликаються (неінвазивно, Р51)
+                    rec["r"] = round(n.wear_ratio(), 6)
+                    rec["ages"] = [round(v / m.eta, 6) for m, v in zip(n.rel.modes, n.rel.v)]
+                    rec["op_pm_h"] = round(n.op_time_since_pm / 3600.0, 4)
+                    rec["pm_wait"] = n.n_pm_waiting
+                    if n.status == NodeState.REPAIR:
+                        rec["mode"] = n.failed_mode
+                self._write(rec)
                 if n.status == NodeState.REPAIR:
                     self._write({"ev": "failure", "t": t, "node": n.id})
             for res, q in n.produced.items():

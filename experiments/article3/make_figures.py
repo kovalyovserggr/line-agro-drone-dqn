@@ -10,6 +10,11 @@
                       «правді» (з таблиць make_table4.py; запускати після нього).
   fig_sens          — Р50: Δ до B1* за η_C2 (переналаштування) і η_C4 (заморожені політики);
                       з table_sens_eta.csv (make_sens.py; запускати після нього).
+  fig_pm_age        — Р51, рис. 7: вік зносової складової у момент ТО і відмови за класами, B1* проти
+                      DQN-TA (raw/policy_events_L.csv, policy_events.py).
+  fig_timeline      — Р51, рис. 8: часова діаграма ТО і відмов усіх екструдерів і принтерів, 120 діб,
+                      B1* і DQN-TA на тому самому seed (замість діаграми Ганта: стани «обробка /
+                      простій» на масштабі тижнів нечитабельні, а технік завантажений лише на 4–5%).
   fig_learning      — криві навчання DQN-TA (прибуток за 26-тижневий навчальний
                       епізод), 3 агенти, малі мультиплікатори за n_printers.
   fig_ablation17    — OEE екструзії (C1) і друку (C2) за 17 принтерів: B1*, DQN-локальна,
@@ -26,6 +31,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))
 
 # Категоріальні кольори (перевірено validate_palette.js, світлий режим; aqua < 3:1 до тла →
 # кожна серія має також власний маркер і прямий підпис)
@@ -289,6 +296,102 @@ def fig_sens(table_dir, out):
     plt.close(fig)
 
 
+PE_SCEN = [("mod12", "Moderate, 12 printers\n(bottleneck: printing)"), ("mod19", "Moderate, 19 printers\n(bottleneck: extrusion)"),
+           ("str15", "Strong degradation,\n15 printers")]
+
+
+def fig_pm_age(raw, out):
+    """Р51, рис. 7: нормований вік зносової складової r = v/η у момент ТО (точки) за класами,
+    B1* проти вибраного агента DQN-TA; пунктир — аналітичний T*/η класу. Під кожною парою —
+    кількість ТО і відмов на рік (середнє за seed журналу). Дані — raw/policy_events_L.csv."""
+    ev = pd.read_csv(os.path.join(raw, "policy_events_L.csv"))
+    runs = pd.read_csv(os.path.join(raw, "policy_events_runs_L.csv"))
+    from line_config_v3 import scenario_classes
+    from analytic_v3 import class_T_star_seconds
+    keys = [k for k, _ in PE_SCEN if k in set(ev.key)]
+    fig, axs = plt.subplots(1, len(keys), figsize=(7.2, 3.3), sharey=True, squeeze=False)
+    rng = np.random.default_rng(0)
+    for ax, key in zip(axs[0], keys):
+        lab = dict(PE_SCEN)[key]
+        e = ev[ev.key == key]
+        sc = e.scenario.iloc[0]
+        cl, _ = scenario_classes(sc)
+        T = class_T_star_seconds(cl)
+        nseed = runs[runs.key == key].groupby("policy").seed.nunique()
+        for j, cls in enumerate(["C1", "C2"]):
+            eta = [m for m in cl[cls]["modes"] if m[3] < 1.0][0][2]
+            ts = T[cls] / 3600 / eta
+            ax.hlines(ts, j * 3 - 0.45, j * 3 + 1.45, color=INK2, lw=1, ls="--", zorder=1)
+            for k, (pol, c, mk) in enumerate([("B1*", C_B1, "D"), ("DQN", C_TA, "o")]):
+                g = e[(e.cls == cls) & (e.policy == pol)]
+                pm, fl = g[g.kind == "pm"], g[g.kind == "failure"]
+                x = j * 3 + k
+                ax.scatter(x + rng.uniform(-0.28, 0.28, len(pm)), pm.r, s=5, color=c, alpha=0.35, lw=0, zorder=2)
+                if len(pm):
+                    ax.hlines(pm.r.median(), x - 0.32, x + 0.32, color=INK, lw=1.6, zorder=3)
+                ax.scatter(x + rng.uniform(-0.28, 0.28, len(fl)), fl.r, s=9, marker="x", color="#b3261e", lw=0.8, zorder=3)
+                ns = nseed.get(pol, 1)
+                ax.text(x, -0.12, f"{len(pm)/ns:.0f}\n{len(fl)/ns:.1f}", ha="center", va="top", fontsize=6.5, color=INK2)
+        ax.set_xticks([0, 1, 3, 4]); ax.set_xticklabels(["B1*", "DQN", "B1*", "DQN"], fontsize=7.5)
+        ax.text(0.5, 1.02, "Extrusion (C1)", transform=ax.get_xaxis_transform(), ha="center", fontsize=7.5, color=INK2)
+        ax.text(3.5, 1.02, "Printing (C2)", transform=ax.get_xaxis_transform(), ha="center", fontsize=7.5, color=INK2)
+        ax.set_title(lab, loc="left", fontsize=8, pad=14)
+        ax.set_xlim(-0.6, 4.6); ax.set_ylim(-0.32, None)
+        ax.grid(axis="x", visible=False)
+        ax.axhline(0, color=GRID, lw=0.6)
+    axs[0][0].set_ylabel("Normalised wear age at intervention, v/η")
+    fig.text(0.5, 0.075, "Numbers below each group: PM interventions per year / failures per year (mean over logged seeds)",
+             ha="center", fontsize=6.8, color=INK2)
+    from matplotlib.lines import Line2D
+    h = [Line2D([], [], marker="o", lw=0, color=C_B1, label="PM, B1*"), Line2D([], [], marker="o", lw=0, color=C_TA, label="PM, DQN-TA (selected agent)"),
+         Line2D([], [], marker="x", lw=0, color="#b3261e", label="failure (any policy)"), Line2D([], [], color=INK, lw=1.6, label="median age at PM"),
+         Line2D([], [], color=INK2, lw=1, ls="--", label="analytical T*/η")]
+    fig.legend(handles=h, loc="lower center", ncol=5, frameon=False, fontsize=7, bbox_to_anchor=(0.5, -0.04))
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
+    for ext in ("png", "pdf"):
+        fig.savefig(os.path.join(out, f"fig_pm_age.{ext}"))
+    plt.close(fig)
+
+
+def fig_timeline(raw, out, key="mod19", seed=None, days=120):
+    """Р51, рис. 8: часова діаграма втручань (ТО — риски, відмови — хрестики) для всіх екструдерів
+    і принтерів за перші `days` діб вікна вимірювання; B1* і DQN-TA на тому самому seed (CRN).
+    Дані — raw/policy_events_L.csv."""
+    ev = pd.read_csv(os.path.join(raw, "policy_events_L.csv"))
+    ev = ev[(ev.key == key) & ev.cls.isin(["C1", "C2"])]
+    seed = seed or int(ev.seed.min())
+    ev = ev[(ev.seed == seed) & (ev.t_h <= days * 24)]
+    nodes = sorted(ev.node.unique(), key=lambda n: (ev[ev.node == n].cls.iloc[0], n))
+    lab = {n: ("E" if ev[ev.node == n].cls.iloc[0] == "C1" else "P") for n in nodes}
+    cnt = {"E": 0, "P": 0}; names = []
+    for n in nodes:
+        cnt[lab[n]] += 1; names.append(f"{lab[n]}{cnt[lab[n]]}")
+    fig, axs = plt.subplots(1, 2, figsize=(7.2, 0.18 * len(nodes) + 1.4), sharey=True)
+    for ax, (pol, title) in zip(axs, [("B1*", "B1* (periodic, class multipliers)"), ("DQN", "DQN-TA (selected agent)")]):
+        d = ev[ev.policy == pol]
+        for i, n in enumerate(nodes):
+            dn = d[d.node == n]
+            pm, fl = dn[dn.kind == "pm"], dn[dn.kind == "failure"]
+            ax.scatter(pm.t_h / 24, [i] * len(pm), marker="|", s=40, color=np.where(pm.pm_waiting, "#eb6834", C_TA), lw=1.2)
+            ax.scatter(fl.t_h / 24, [i] * len(fl), marker="x", s=16, color="#b3261e", lw=0.9)
+        n_c1 = sum(1 for n in nodes if lab[n] == "E")
+        ax.axhline(n_c1 - 0.5, color=GRID, lw=0.8)
+        ax.set_title(title, loc="left", fontsize=8.5)
+        ax.set_xlabel("Days from the start of the measurement window")
+        ax.set_xlim(0, days); ax.grid(axis="y", visible=False)
+    axs[0].set_yticks(range(len(nodes))); axs[0].set_yticklabels(names, fontsize=6)
+    axs[0].set_ylim(len(nodes) - 0.5, -0.5)
+    from matplotlib.lines import Line2D
+    h = [Line2D([], [], marker="|", lw=0, ms=8, mew=1.2, color=C_TA, label="PM at an operation boundary"),
+         Line2D([], [], marker="|", lw=0, ms=8, mew=1.2, color="#eb6834", label="PM while waiting / blocked"),
+         Line2D([], [], marker="x", lw=0, color="#b3261e", label="failure")]
+    fig.legend(handles=h, loc="lower center", ncol=3, frameon=False, fontsize=7.5, bbox_to_anchor=(0.5, -0.01))
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    for ext in ("png", "pdf"):
+        fig.savefig(os.path.join(out, f"fig_timeline.{ext}"))
+    plt.close(fig)
+
+
 def fig_learning(raw, out):
     fig, axs = plt.subplots(2, 2, figsize=(7.2, 4.4), sharex=True)
     for ax, n in zip(axs.flat, NS):
@@ -350,6 +453,9 @@ def main():
         fig_robust(tdir, a.out)
     if os.path.exists(os.path.join(tdir, "table_sens_eta.csv")):
         fig_sens(tdir, a.out)
+    if os.path.exists(os.path.join(a.raw, "policy_events_L.csv")):
+        fig_pm_age(a.raw, a.out)
+        fig_timeline(a.raw, a.out, key="mod19" if "mod19" in set(pd.read_csv(os.path.join(a.raw, "policy_events_L.csv")).key) else "mod12")
     fig_learning(a.raw, a.out)
     fig_ablation17(a.raw, a.out)
     print("рисунки збережено в", a.out)
