@@ -704,10 +704,21 @@ class NoPM:                       # B0
     def decide(self, node, epoch, d_next): return CONTINUE
 
 class PeriodicPM:                 # B1: напрацювання з останнього ТО ≥ T (на межі операцій, E1)
-    def __init__(self, T_by_class: dict): self.T = T_by_class; self.name = "B1_periodic"
+    """clock="op" (B1, B1*): лічильник напрацювання з останнього ТО; ремонт його не скидає.
+    clock="age" (B1a, B1a*, Р52): віртуальний вік зносової складової v (скидається і ТО, і ремонтом
+    цієї складової) — класична заміна за віком: «ТО у віці T або заміна при відмові»."""
+    def __init__(self, T_by_class: dict, clock: str = "op"):
+        assert clock in ("op", "age")
+        self.T, self.clock = T_by_class, clock
+        self.name = "B1_periodic" if clock == "op" else "B1a_age"
     def decide(self, node, epoch, d_next):
         T = self.T.get(node.cls)
-        return PM if (epoch == E1 and T is not None and node.op_time_since_pm >= T) else CONTINUE
+        if epoch != E1 or T is None:
+            return CONTINUE
+        if self.clock == "op":
+            return PM if node.op_time_since_pm >= T else CONTINUE
+        v = max((v for m, v in zip(node.rel.modes, node.rel.v) if m.q_pm < 1.0), default=0.0)
+        return PM if v >= T else CONTINUE
 
 class RiskPM:                     # B2: p_f(наступна операція) > θ (на межі операцій, E1)
     def __init__(self, theta_by_class: dict): self.th = theta_by_class; self.name = "B2_risk"

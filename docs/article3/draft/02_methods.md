@@ -362,6 +362,10 @@ technician constraint as the agent.
   m_c are tuned by one pass of coordinate descent, first over C2 and then over C1, on the grid
   {0.25, 0.35, 0.5, 0.75, 1.0}, starting from the best common m. Classes C3, C4 and C6 do not reach their T*_c
   within the evaluation horizon, so they receive no PM (Р35).
+- **B1a / B1a\* — age replacement on the component's virtual age** (Р52). These are identical to B1 / B1\*,
+  except that the clock is the virtual age of the wear component. That age is reset both by PM and by the repair
+  of that component, as in classical age replacement [REF: Barlow & Proschan 1965]. B1 and B1\* count operating
+  time since the last PM, and a corrective repair does not reset that count. [TODO Р52: tuning budget and results.]
 - **B2 — risk threshold.** PM is performed when the failure probability over the next operation exceeds θ.
   The threshold is tuned over θ ∈ {3·10⁻⁴, 10⁻³, 3·10⁻³}.
 - **B3+ — opportunistic.** PM is performed during waiting or blocking (E2/E3) if r > x. At operation

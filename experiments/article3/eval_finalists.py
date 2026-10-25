@@ -31,9 +31,11 @@ def job(a):
     name, param, b3m, n_pr, seed, scenario, b1star, ttf = a
     cl, ov = scenario_classes(scenario, ttf=ttf)
     T = class_T_star_seconds(cl)
-    if name == "B1*":
+    if name in ("B1*", "B1a*"):
+        if name == "B1a*" and not b1star:
+            raise ValueError("B1a* потребує --b1star з множниками, налаштованими для clock=age")
         mult = b1star or B1STAR[n_pr]
-        pol = PeriodicPM({c: m * T[c] for c, m in mult.items()})
+        pol = PeriodicPM({c: m * T[c] for c, m in mult.items()}, clock="age" if name == "B1a*" else "op")
         param = json.dumps(mult, sort_keys=True)
     elif name == "B3+":
         pol = make_policy("B3", param, T, b3m)

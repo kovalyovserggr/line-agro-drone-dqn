@@ -155,6 +155,26 @@ def main():
         for ag, g in d.groupby("param"):
             put(f"SE_{tag_}_test_d_a{ag}", ((g.set_index("seed").profit - ref) / 1e3).mean(), "sens test", "{:+.1f}")
 
+    # --- поведінка політик за журналом подій (Р51) -------------------------------------
+    pe = os.path.join(R, "policy_events_L.csv")
+    if os.path.exists(pe):
+        ev = pd.read_csv(pe)
+        runs = pd.read_csv(os.path.join(R, "policy_events_runs_L.csv"))
+        put("EV_all_identical", bool(runs.identical.all()), "policy_events_runs_L.csv", "{}")
+        put("EV_n_runs", len(runs), "policy_events_runs_L.csv", "{}")
+        ns = runs.groupby(["key", "policy"]).seed.nunique()
+        for (k, p, c), g in ev.groupby(["key", "policy", "cls"]):
+            pol = "B1star" if p == "B1*" else "DQN"
+            pm, fl = g[g.kind == "pm"], g[g.kind == "failure"]
+            n = ns[(k, p)]
+            put(f"EV_{k}_{pol}_{c}_pm_yr", len(pm) / n, "policy_events_L.csv")
+            put(f"EV_{k}_{pol}_{c}_fail_yr", len(fl) / n, "policy_events_L.csv")
+            if len(pm) >= 3:
+                put(f"EV_{k}_{pol}_{c}_r_med", pm.r.median(), "policy_events_L.csv", "{:.3f}")
+                put(f"EV_{k}_{pol}_{c}_r_cv", pm.r.std() / pm.r.mean(), "policy_events_L.csv", "{:.2f}")
+                put(f"EV_{k}_{pol}_{c}_wait_pct", 100 * pm.pm_waiting.mean(), "policy_events_L.csv", "{:.0f}")
+                put(f"EV_{k}_{pol}_{c}_young_pct", 100 * (pm.r < 0.5 * pm.r.median()).mean(), "policy_events_L.csv", "{:.1f}")
+
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with open(a.out, "w", encoding="utf-8", newline="\r\n") as fh:
         fh.write("# Аркуш чисел для Results (згенеровано results_numbers.py — не редагувати вручну)\n\n")

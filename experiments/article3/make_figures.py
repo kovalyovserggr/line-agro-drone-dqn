@@ -326,10 +326,13 @@ def fig_pm_age(raw, out):
                 g = e[(e.cls == cls) & (e.policy == pol)]
                 pm, fl = g[g.kind == "pm"], g[g.kind == "failure"]
                 x = j * 3 + k
-                ax.scatter(x + rng.uniform(-0.28, 0.28, len(pm)), pm.r, s=5, color=c, alpha=0.35, lw=0, zorder=2)
+                # ТО — ліва частина групи, відмови зносової складової — права (щоб не перекривались)
+                ax.scatter(x - 0.12 + rng.uniform(-0.2, 0.2, len(pm)), pm.r, s=5, color=c, alpha=0.35, lw=0, zorder=2)
                 if len(pm):
-                    ax.hlines(pm.r.median(), x - 0.32, x + 0.32, color=INK, lw=1.6, zorder=3)
-                ax.scatter(x + rng.uniform(-0.28, 0.28, len(fl)), fl.r, s=9, marker="x", color="#b3261e", lw=0.8, zorder=3)
+                    ax.hlines(pm.r.median(), x - 0.36, x + 0.12, color=INK, lw=1.6, zorder=3)
+                flw = fl[fl["mode"] == 0] if "mode" in fl else fl
+                ax.scatter(x + 0.27 + rng.uniform(-0.1, 0.1, len(flw)), flw.r, s=6, marker="x", color="#b3261e",
+                           lw=0.6, alpha=0.6, zorder=3)
                 ns = nseed.get(pol, 1)
                 ax.text(x, -0.12, f"{len(pm)/ns:.0f}\n{len(fl)/ns:.1f}", ha="center", va="top", fontsize=6.5, color=INK2)
         ax.set_xticks([0, 1, 3, 4]); ax.set_xticklabels(["B1*", "DQN", "B1*", "DQN"], fontsize=7.5)
@@ -344,7 +347,7 @@ def fig_pm_age(raw, out):
              ha="center", fontsize=6.8, color=INK2)
     from matplotlib.lines import Line2D
     h = [Line2D([], [], marker="o", lw=0, color=C_B1, label="PM, B1*"), Line2D([], [], marker="o", lw=0, color=C_TA, label="PM, DQN-TA (selected agent)"),
-         Line2D([], [], marker="x", lw=0, color="#b3261e", label="failure (any policy)"), Line2D([], [], color=INK, lw=1.6, label="median age at PM"),
+         Line2D([], [], marker="x", lw=0, color="#b3261e", label="wear-mode failure"), Line2D([], [], color=INK, lw=1.6, label="median age at PM"),
          Line2D([], [], color=INK2, lw=1, ls="--", label="analytical T*/η")]
     fig.legend(handles=h, loc="lower center", ncol=5, frameon=False, fontsize=7, bbox_to_anchor=(0.5, -0.04))
     fig.tight_layout(rect=(0, 0.1, 1, 1))

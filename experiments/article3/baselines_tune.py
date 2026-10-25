@@ -33,6 +33,8 @@ def make_policy(kind, param, Tstar, b3_m=1.0):
         return NoPM()
     if kind == "B1":
         return PeriodicPM({c: param * T for c, T in Tstar.items()})
+    if kind == "B1a":                      # Р52: за віртуальним віком зносової складової
+        return PeriodicPM({c: param * T for c, T in Tstar.items()}, clock="age")
     if kind == "B2":
         return RiskPM({c: param for c in Tstar})
     if kind == "B3":
@@ -72,7 +74,7 @@ def main():
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     crews = [None if c == "inf" else int(c) for c in a.crew]
-    grid = {"B0": [0.0], "B1": a.b1, "B2": a.b2, "B3": a.b3}
+    grid = {"B0": [0.0], "B1": a.b1, "B1a": a.b1, "B2": a.b2, "B3": a.b3}
     cap0 = a.type0_cap if a.type0_cap == "auto" else float(a.type0_cap)
     jobs = [(a.scenario, k, p, s, c, dsp, cap0, npr, bool(a.time_carry), a.b3_m, a.ttf) for npr in a.n_printers for dsp in a.dispatch for c in crews
             for k in a.policies for p in grid[k] for s in a.seeds]

@@ -118,36 +118,73 @@ significantly worse nowhere.
 
 ## 3.4. What the agent does differently
 
-**Opportunistic maintenance is not the mechanism.** Our initial hypothesis was that a learned policy would
-schedule PM while a node waits for inputs, when PM costs little throughput. The data do not support it. Only
-1.6–4.0% of the selected agents' interventions start while the node is waiting or blocked
-<!-- pmwait_share_SEL_n -->. The tuned opportunistic rule B3+ gains nothing over periodic PM either
+To see how the agent's policy differs from B1\*, we re-ran the selected agents and B1\* with the event log on
+three test seeds (100000–100002) in three scenarios: 12 and 19 printers with moderate degradation, and 15
+printers with strong degradation. Logging does not alter the simulation: all 18 logged runs reproduce the logged
+test profits bit for bit. <!-- EV_all_identical, EV_n_runs -->
+Figure 7 [FIG 7: fig_pm_age] shows the normalised wear age v/η of the restored component at every PM and at every
+wear-mode failure. Figure 8 [FIG 8: fig_timeline] shows the intervention timeline of all extruders and printers
+in the 19-printer scenario.
+
+Three differences stand out.
+
+**1. Maintenance effort follows the bottleneck.**
+
+- **12 printers (printing is the bottleneck).** Compared with B1\*, the agent:
+  - maintains the printers more often and earlier: 330 vs 288 PM/year, median age at PM 0.176η vs 0.226η;
+  - suffers fewer printer failures: 33.7 vs 37.0 per year;
+  - maintains the extruders, which have spare capacity, rarely and late: 7 vs 16 PM/year, at a median age of
+    0.70η, well beyond the analytical optimum T\*/η = 0.475;
+  - still has fewer extruder failures than B1\*: 3.7 vs 5.0 per year.
+- **19 printers (extrusion is the bottleneck).** The pattern reverses:
+  - the agent maintains the extruders more often and earlier than B1\*: 74 vs 60 PM/year, at 0.125η vs 0.166η;
+  - it maintains the printers less often: 246 vs 266 PM/year.
+
+Class-level OEE values agree with this pattern. With 12 printers, printer OEE is 0.882 vs 0.878 and extruder OEE
+0.868 vs 0.878; throughput is 27.92 vs 27.78 drones/week. With 19 printers, extruder OEE is 0.895 vs 0.893 and
+throughput 37.69 vs 37.57.
+<!-- EV_mod12_*, EV_mod19_*, C1OEE_SEL_n, C2OEE_SEL_n, thr_SEL_n -->
+This is the behaviour the throughput-accounting reward was designed to induce (Section 2.4.4). It is also what
+the local-reward agent fails to do once the bottleneck moves (Section 3.5).
+
+**2. The agent maintains the component's actual age, not the time since the last PM.** B1\* triggers PM when the
+operating time since the last PM reaches m·T\*. A corrective repair renews the failed wear component
+(Section 2.2.1) but does not reset this counter. Some scheduled PMs therefore fall on a component that was
+renewed shortly before. Under B1\*, 7.8–20.7% of PMs restore a component younger than half the policy's median
+PM age. The exception is the classes maintained very frequently, where the share is only 2.2–2.5%: the extruders
+with 19 printers and the printers under strong degradation. For the agent, which observes the virtual age, the share is 0–0.1%. Its ages at PM are
+also more uniform: the coefficient of variation of v/η at PM for the printers is 0.09–0.13 against 0.13–0.29 for
+B1\*.
+<!-- EV_*_young_pct, EV_*_r_cv -->
+In Figure 8 the difference is visible as timing: B1\* maintains all printers (and all extruders) on nearly the
+same days, because their operating times run in step, whereas the agent's interventions are spread out
+according to each machine's own condition.
+
+This raises a fair question about the baseline. A classical age-replacement policy [REF: Barlow & Proschan 1965]
+resets its clock at every renewal, including failure replacement. We therefore evaluate such a variant
+(B1a/B1a\*, Section 3.4.1) [TODO Р52: results pending].
+
+**3. Under strong degradation, the agent saves PM cost.** B1\* uses a very short printer interval (m_C2 = 0.25)
+and performs 705 printer PMs per year. The agent performs 489, at a later median age (0.151η vs 0.113η). It
+accepts slightly more printer failures (36.0 vs 30.7 per year) and comes out ahead on profit (Table 4).
+<!-- EV_str15_* -->
+
+**Opportunistic maintenance plays a minor role.** Our initial hypothesis was that a learned policy would schedule
+PM while a node waits for inputs, when PM costs little throughput. The agent does this where it is useful: with 12
+printers, all of its extruder PMs start while the extruder is blocked or starved.
+<!-- EV_mod12_DQN_C1_wait_pct = 100 -->
+But extruder PMs are few, so only 1.6–4.0% of all the agent's interventions start during waiting
+<!-- pmwait_share_SEL_n -->. The bottleneck class, whose maintenance matters most, rarely waits. Under the decision
+grid (Section 2.4.2), a busy node is queried at operation boundaries, because its age grows only during
+processing. Consistently with this, the tuned opportunistic rule B3+ gains nothing over periodic PM
 (Section 3.3).
 
-Two factors explain this. First, the nodes that need maintenance most — the bottleneck class — rarely wait.
-Second, under the decision grid (Section 2.4.2) a busy node is queried at an operation boundary, because its
-age grows only while it is processing. Decisions during waiting therefore arise only for nodes that are blocked or
-starved after an operation, which are mainly the non-bottleneck extruders.
+### 3.4.1. Age-based classical baseline
 
-[TODO (Р51, a3-policy-events-L): the event-log analysis shows that the agent does use this opportunity for the
-extruders. In the pilot, all of its extruder PMs started while the extruder was blocked, but extruder PMs are
-few, hence the small overall share. Replace this paragraph with the official numbers.]
-
-**Maintenance effort is shifted towards the bottleneck.** The class-level OEE values point to a different
-mechanism. With 12 printers (printing is the bottleneck), compared with B1\*, the selected agent:
-
-- keeps the printers at a higher OEE (0.882 vs 0.878);
-- lets the extruders, which have spare capacity, run at a lower OEE (0.868 vs 0.878);
-- produces more (27.92 vs 27.78 drones/week).
-
-With 19 printers (extrusion is the bottleneck), the agent keeps the extruders slightly above B1\* (0.895 vs
-0.893) and again produces more (37.69 vs 37.57).
-<!-- C1OEE_SEL_n, C2OEE_SEL_n, thr_SEL_n vs B1* -->
-
-These differences are small, in line with the small profit differences in Table 4.
-[TODO: the event-log analysis planned as Figures 7–8 — age at PM by class against the analytical T*, and a
-Gantt fragment — will show directly where and when the agent's interventions differ from B1\*. It requires a
-short logged re-run of the selected agents and of B1\* on 2–3 test seeds.]
+[TODO Р52: B1a (one multiplier) and B1a\* (class multipliers), periodic PM on the virtual age of the wear
+component, re-tuned and tested on all six scenarios. Pilot (C, one seed, moderate, 15 printers, B1\* multipliers):
+the age clock alone raises profit from 6 896.2 to 6 909.6 k USD with fewer PMs (342 vs 380), comparable to the
+agent's advantage. If confirmed, the paper's comparison must be against B1a\*.]
 
 ## 3.5. Reward design: local versus throughput accounting
 

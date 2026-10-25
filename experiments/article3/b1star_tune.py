@@ -24,15 +24,15 @@ INF = "inf"
 
 
 def job(args):
-    scenario, mults, seed, crew, horizon_scale, n_pr = args
+    scenario, mults, seed, crew, horizon_scale, n_pr, clock = args
     cl, ov = scenario_classes(scenario)
     Tstar = class_T_star_seconds(cl)
     T = {c: float(mults[c]) * Tstar[c] for c in Tstar if mults.get(c, INF) != INF}
     t0 = time.time()
-    m = run_v3(seed, PeriodicPM(T), horizon_h=(WARMUP_H + WINDOW_H) * horizon_scale,
+    m = run_v3(seed, PeriodicPM(T, clock=clock), horizon_h=(WARMUP_H + WINDOW_H) * horizon_scale,
                warmup_h=WARMUP_H * horizon_scale, classes=cl, node_overrides=ov, crew=crew,
                n_printers=n_pr)
-    m.update({"scenario": scenario, "policy": "B1star", "mults": json.dumps(mults, sort_keys=True),
+    m.update({"scenario": scenario, "policy": "B1star" if clock == "op" else "B1astar", "mults": json.dumps(mults, sort_keys=True),
               "seed": seed, "n_printers": n_pr, "wall_s": round(time.time() - t0, 1)})
     return m
 
@@ -48,6 +48,8 @@ def main():
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--horizon-scale", type=float, default=1.0, help="лише для димового тесту (<1)")
     ap.add_argument("--n-printers", nargs="+", type=int, default=[15])
+    ap.add_argument("--clock", default="op", choices=["op", "age"],
+                    help="op — напрацювання з ТО (B1*); age — віртуальний вік зносової складової (B1a*, Р52)")
     ap.add_argument("--resume", action="store_true",
                     help="дочитати вже пораховані конфігурації з --out (повні за seed) і дописувати нові рядки")
     ap.add_argument("--summary", default=None, help="JSON з підсумковими множниками B1* (Р50: для конвеєра)")
@@ -62,7 +64,8 @@ def main():
         with open(a.out, newline="") as fr:
             rows = list(csv.DictReader(fr))
         for r in rows:
-            if r["scenario"] == a.scenario and int(r["seed"]) in a.seeds:
+            if r["scenario"] == a.scenario and int(r["seed"]) in a.seeds and \
+                    r.get("policy", "B1star") == ("B1star" if a.clock == "op" else "B1astar"):
                 prev.setdefault((int(r["n_printers"]), r["mults"]), {})[int(r["seed"])] = float(r["profit"])
         complete = {k for k, v in prev.items() if len(v) == len(a.seeds)}
         with open(a.out, "w", newline="") as fw:   # лишаємо лише повні конфігурації
@@ -87,7 +90,7 @@ def main():
                 mults[cls] = g if g == INF else float(g)
                 cands.append(mults)
             todo = [m for m in cands if json.dumps(m, sort_keys=True) not in cache]
-            jobs = [(a.scenario, m, s, a.crew, a.horizon_scale, n_pr) for m in todo for s in a.seeds]
+            jobs = [(a.scenario, m, s, a.crew, a.horizon_scale, n_pr, a.clock) for m in todo for s in a.seeds]
             acc = {}
             for r in pool.imap_unordered(job, jobs):
                 if writer is None:
