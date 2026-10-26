@@ -41,41 +41,45 @@ def run(cmd, log):
     print(f"   ✓ {time.time() - t0:.0f} с", flush=True)
 
 
+def pipeline(sc, n, tag, W, raw):
+    """B1a / B1a* для одного сценарію: налаштування, спуск, тест (див. опис модуля)."""
+    pre = os.path.join(raw, f"b1a_{tag}")
+    log = open(pre + "_pipeline.log", "a", encoding="utf-8")
+    print(f"=== {tag} ({sc}, {n} принтерів)", flush=True)
+    tune = pre + "_tune_L.csv"
+    if rows(tune) != len(B1_GRID) * len(TUNE_SEEDS):
+        run([PY, os.path.join(HERE, "baselines_tune.py"), "--scenario", sc, "--crew", "1", "--n-printers", str(n),
+             "--policies", "B1a", "--b1", *B1_GRID, "--seeds", *TUNE_SEEDS, "--workers", W, "--out", tune], log)
+    g = pd.read_csv(tune).groupby("param").profit.mean()
+    m_star = float(g.idxmax())
+    star_sum = pre + "_b1star.json"
+    run([PY, os.path.join(HERE, "b1star_tune.py"), "--scenario", sc, "--n-printers", str(n), "--clock", "age",
+         "--order", "C2", "C1", "--grid", *STAR_GRID, "--start", str(m_star), "--seeds", *TUNE_SEEDS,
+         "--workers", W, "--out", pre + "_b1star_L.csv", "--summary", star_sum, "--resume"], log)
+    mults = json.load(open(star_sum))[str(n)]["mults"]
+    b1a_star = {c: float(v) for c, v in mults.items() if v != "inf"}
+    sel = {"scenario": sc, "n_printers": n, "m_star": m_star, "b1a_star": b1a_star,
+           "tune_profit_k": {str(k): v / 1e3 for k, v in g.items()}, "fixed_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if not os.path.exists(pre + "_selection.json"):
+        json.dump(sel, open(pre + "_selection.json", "w"), indent=1)
+    print(f"   m* = {m_star}, B1a* = {b1a_star}", flush=True)
+    test = pre + "_test_L.csv"
+    if rows(test) != 2 * 20:
+        run([PY, os.path.join(HERE, "eval_finalists.py"), "--scenario", sc, "--n-printers", str(n),
+             "--finalists", f"B1a:{m_star}", "B1a*", "--b1star", json.dumps(b1a_star),
+             "--seeds-range", "100000", "100020", "--workers", W, "--out", test], log)
+    return m_star, b1a_star
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--raw", default=os.path.join(HERE, "raw"))
     ap.add_argument("--scenarios", nargs="+", default=[t for *_, t in SCEN])
     a = ap.parse_args()
-    W = str(a.workers)
     for sc, n, tag in SCEN:
-        if tag not in a.scenarios:
-            continue
-        pre = os.path.join(a.raw, f"b1a_{tag}")
-        log = open(pre + "_pipeline.log", "a", encoding="utf-8")
-        print(f"=== {tag} ({sc}, {n} принтерів)", flush=True)
-        tune = pre + "_tune_L.csv"
-        if rows(tune) != len(B1_GRID) * len(TUNE_SEEDS):
-            run([PY, os.path.join(HERE, "baselines_tune.py"), "--scenario", sc, "--crew", "1", "--n-printers", str(n),
-                 "--policies", "B1a", "--b1", *B1_GRID, "--seeds", *TUNE_SEEDS, "--workers", W, "--out", tune], log)
-        g = pd.read_csv(tune).groupby("param").profit.mean()
-        m_star = float(g.idxmax())
-        star_sum = pre + "_b1star.json"
-        run([PY, os.path.join(HERE, "b1star_tune.py"), "--scenario", sc, "--n-printers", str(n), "--clock", "age",
-             "--order", "C2", "C1", "--grid", *STAR_GRID, "--start", str(m_star), "--seeds", *TUNE_SEEDS,
-             "--workers", W, "--out", pre + "_b1star_L.csv", "--summary", star_sum, "--resume"], log)
-        mults = json.load(open(star_sum))[str(n)]["mults"]
-        b1a_star = {c: float(v) for c, v in mults.items() if v != "inf"}
-        sel = {"scenario": sc, "n_printers": n, "m_star": m_star, "b1a_star": b1a_star,
-               "tune_profit_k": {str(k): v / 1e3 for k, v in g.items()}, "fixed_at": time.strftime("%Y-%m-%d %H:%M:%S")}
-        if not os.path.exists(pre + "_selection.json"):
-            json.dump(sel, open(pre + "_selection.json", "w"), indent=1)
-        print(f"   m* = {m_star}, B1a* = {b1a_star}", flush=True)
-        test = pre + "_test_L.csv"
-        if rows(test) != 2 * 20:
-            run([PY, os.path.join(HERE, "eval_finalists.py"), "--scenario", sc, "--n-printers", str(n),
-                 "--finalists", f"B1a:{m_star}", "B1a*", "--b1star", json.dumps(b1a_star),
-                 "--seeds-range", "100000", "100020", "--workers", W, "--out", test], log)
+        if tag in a.scenarios:
+            pipeline(sc, n, tag, str(a.workers), a.raw)
     print("Р52 завершено", flush=True)
 
 
