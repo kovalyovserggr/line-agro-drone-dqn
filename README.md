@@ -1,60 +1,45 @@
-# line-agro-drone
+# line-agro-drone-dqn
 
-Об'єктно-орієнтована симуляційна модель виробничої лінії складання агродронів
-(26 вузлів), параметризована даними реальних вузлів (data-driven simulation
-model — **не** цифровий двійник у строгому сенсі: без двостороннього зв'язку
-з фізичним обладнанням у реальному часі).
+Simulation, code and experimental data for the article on **DQN-based optimization of efficiency and reliability of an automated agrodrone production line** (Article 3 of the dissertation series *"Optimization of Efficiency and Reliability of Automated Production Systems Using Artificial Intelligence Methods"*, Central Ukrainian National Technical University).
 
-Розроблено для статті 1 дисертаційної серії:
-*«Ієрархічна методологія інтеграції механізмів штучного інтелекту для
-оптимізації ефективності та надійності автоматизованих виробничих ліній»*
-(Serhii Kovalov, ЦНТУ, науковий консультант — проф. Аулін В.В.).
+> Working branch and default branch: `article3-dqn`.
+> Every reported experiment is tied to a git tag `a3-*` and a row in `experiments/article3/runs_index.md`.
 
-## Структура репозиторію
+## What is here
 
+| Path | Content |
+|---|---|
+| `experiments/article3/` | **Everything for Article 3**: training, evaluation and baseline scripts, figures/tables generation, run logs |
+| `experiments/article3/runs_index.md` | Index of all runs: run_id, date, tag, full command, environment and agent seeds, parameters, files, status |
+| `experiments/article3/RESULTS_LOG.md` | Chronological log of results and decisions |
+| `experiments/article3/raw/` | Raw metrics (CSV) and agent folders of the runs |
+| `src/`, `tests/` | Simulation model of the production line (`AgroDroneLine`) and its tests |
+| `experiments/run_parametric_study.py`, `experiments/runs_index.md`, `experiments/RESULTS_LOG.md` | **Inherited from Article 1** (see below) |
+
+## Inherited Article 1 files
+
+This repository was created from the local clone of the Article 1 repository (`kovalyovserggr/line-agro-drone`), so its history is shared. Files outside `experiments/article3/` that belong to Article 1 (`experiments/run_parametric_study.py`, `experiments/runs_index.md`, `experiments/RESULTS_LOG.md`) describe the T_pm parametric study of the simulation and are **not** part of Article 3 results. The Article 1 data are published separately in the Article 1 repository (tag `paper1-data-v1`).
+
+## Reproducing results
+
+1. Python environment with the dependencies of the simulation and of the agent (PyTorch).
+2. Check out the tag of the run you need, e.g. `git checkout a3-...` (list: `git tag -l "a3-*"`).
+3. Take the **full command** from the row of `experiments/article3/runs_index.md` and run it from the repository root.
+
+The simulation is deterministic for a given seed. Training uses separate seeds for the environment and for the agent; evaluation uses a fixed set of 20 test seeds (100000–100019) that are not used in training. Seeds of every run are listed in `runs_index.md`.
+
+## Event logs
+
+Large event logs are not stored in git. They are attached to the repository **Release** as a zip archive with a SHA256 checksum (also recorded in `runs_index.md`). Verify after download:
+
+```powershell
+Get-FileHash <archive>.zip -Algorithm SHA256
 ```
-src/            — код моделі (12 файлів, плоскі імпорти — див. "Запуск" нижче)
-experiments/    — параметричне дослідження T_pm (стаття 1, розділ 4.2)
-docs/           — журнал рішень, специфікація моделі, мапа рисунків
-tests/          — димові тести (перевіряють, що FSM не зависає/не падає)
-```
 
-## Запуск
+## Citation
 
-Файли в `src/` використовують плоскі імпорти (`from Resource import ...`,
-без пакетних префіксів) — це свідомий вибір, щоб не переписувати імпорти в
-усіх 12 файлах перед критичним експериментом (див. `docs/DECISIONS.md`).
-Тому `src/` має бути на шляху пошуку модулів:
+See `CITATION.cff` (GitHub shows a "Cite this repository" button). After the article is accepted, the final state will be tagged `paper3-v1` and archived with a DOI.
 
-```bash
-cd src && python SoftwareSimulation.py       # інтерактивний реальночасовий режим
-# або
-PYTHONPATH=src python experiments/run_parametric_study.py   # батч-експеримент
-```
+## License
 
-## Залежності
-
-`scipy`, `numpy`, `matplotlib` — див. `requirements.txt`.
-
-## Стан моделі
-
-Базова FSM вузла (`ProductionNode`) реалізує:
-- випадкові відмови (REPAIR) за полем `reliability.reliability` (λ безвідмовності);
-- планове технічне обслуговування (MAINTENANCE) — за `T_pm` (експериментальний
-  параметр для парку 3D-друку, вузли 2–16) або за природним розподілом
-  `reliability.maintenance_interval` для решти вузлів;
-- точки інтеграції DQN-агента (`NodeAgent`, `ResourceAgent`) — наразі стаби,
-  заповнюються в репозиторії статті 3 (окремий репозиторій, форк цього коду).
-
-Детальні інженерні рішення й компроміси — у `docs/DECISIONS.md`.
-
-## Дані
-
-Параметри вузлів (продуктивність, розподіли надійності) взято з конфігурації
-симуляційної моделі; джерело фізичних значень (паспортні характеристики /
-експертні оцінки / довідники надійності) уточнюється — див. відкритий пункт
-у `docs/DECISIONS.md`.
-
-## Ліцензія
-
-MIT — див. `LICENSE`.
+MIT, see `LICENSE`.

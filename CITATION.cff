@@ -1,12 +1,17 @@
 cff-version: 1.2.0
-message: "Якщо використовуєте цей код, будь ласка, цитуйте його так:"
-title: "line-agro-drone: data-driven simulation model of an agricultural drone production line"
+message: "If you use this software or data, please cite it as below."
+title: "Line-agro-drone-dqn: DQN-based optimization of an agrodrone production line (simulation, code and experimental data)"
+type: software
 authors:
-  - family-names: "Kovalov"
-    given-names: "Serhii"
-    email: "kovalyovserggr@ukr.net"
+  - family-names: Kovalyov
+    given-names: Serhii
     affiliation: "Central Ukrainian National Technical University"
-version: 0.1.0
-date-released: 2026-09-11
+repository-code: "https://github.com/kovalyovserggr/line-agro-drone-dqn"
 license: MIT
-repository-code: "https://github.com/kovalyovserggr/line-agro-drone"
+keywords:
+  - deep reinforcement learning
+  - DQN
+  - digital twin
+  - automated production line
+  - reliability
+  - discrete-event simulation
