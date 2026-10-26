@@ -6,3 +6,5 @@ experiments/raw/*.csv
 experiments/raw/*.json
 .DS_Store
 experiments/article3/raw/eventlogs/
+
+*.rar
